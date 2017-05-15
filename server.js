@@ -3,7 +3,7 @@ var flags = require('mysql2/lib/constants/client.js');
 var auth = require('mysql2/lib/auth_41.js');
 
 var translator = require('./translator');
-var db = require('./pool').pool;
+var db = require('./pool');
 
 function authenticate (params, cb) {
 	//console.log(params);
@@ -50,16 +50,7 @@ console.log('error');
 console.log(err);
 	});
 
-	/*
-	conn.on('field_list', function (table, fields) {
-		console.log('field list:', table, fields);
-		conn.writeEof();
-	});
-	*/
-
 	conn.on('query', function (query) {
-console.log('-- query: ' + query);
-
 		// use this to avoid translating the ast
 		var pg_query = null;
 
@@ -70,9 +61,6 @@ console.log('-- query: ' + query);
 			return send_database(conn);
 		if (query_lower == 'select @@session.sql_mode')
 			return send_session_sql_mode(conn);
-
-		if (query_lower == 'show databases')
-			pg_query = 'SELECT datname FROM pg_database WHERE datistemplate = false';
 
 		var ast = translator.parse_stmt(query);
 		if (ast == null)
@@ -85,49 +73,46 @@ console.log('-- query: ' + query);
 			pg_query = "SELECT f.attname AS Name, pg_catalog.format_type(f.atttypid,f.atttypmod) AS Type, CASE WHEN f.attnotnull THEN 'NO' ELSE 'YES' END AS NULL, CASE WHEN p.contype = 'p' THEN 'PRI' ELSE '' END AS Key, CASE WHEN f.atthasdef = 't' THEN d.adsrc END AS default, '' AS Extra FROM pg_attribute f JOIN pg_class c ON c.oid = f.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = f.attnum LEFT JOIN pg_namespace n ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON p.conrelid = c.oid AND f.attnum = ANY (p.conkey) WHERE c.relkind = 'r'::char AND f.attnum > 0 AND n.nspname = 'public' and c.relname = '" + ast.table + "'";
 			ast.expr = 'SELECT';
 		}
-		if (ast.expr == 'SHOW') {
-			if (ast.obj == 'TABLES') {
-				if (!ast.cond) {
-					pg_query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name";
-				} else if (ast.cond.oper == 'LIKE') {
-					pg_query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE " + ast.cond.value + " ORDER BY table_name";
-				} else if (ast.cond.oper == 'WHERE') {
-					pg_query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name AND " + translator.where_expr(ast.cond.expr) + " ORDER BY table_name";
-				}
-			}
-		}
 
-		if (!pg_query)
+		if (pg_query)
+			pg_query = Promise.resolve(pg_query);
+		else
 			pg_query = translator.ast_to_pgsql(ast);
-console.log('sending: ' + pg_query);
-		db.query(pg_query, [], function(err, result) {
-			if (err) {
-				console.log('-- error: ' + err.message);
 
-				var missing_table = err.message.match(/^relation "(.*)" does not exist$/);
-				if (missing_table) {
-					return conn.writeError({code:1146, message:"Table '" + db_name + "." + missing_table[1] + "' doesn't exist"});
-				}
-
-				// error code 1046 is no database selected, 1146 is table doesn't exist
-				return conn.writeError({ code: 0, message: err.message });
-			}
-
-			if (['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN'].includes(ast.expr)) {
-//console.log('select');
+		pg_query.then(sql => {
+			db.query(sql)
+				.then(result => {
+console.log();
+console.log('query: ' + query);
+console.log('sent: ' + sql);
+					if (['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN'].includes(ast.expr)) {
 //console.log(result.rows);
-				conn.writeColumns(result.fields.map(pg_to_my_field));
-				result.rows.forEach(r => conn.writeTextRow(pg_to_my_row(r)));
-				conn.writeEof();
-				//conn.writeOk();
-			} else if (ast.expr == 'INSERT' || ast.expr == 'UPDATE' || ast.expr == 'DELETE') {
-//console.log('insert');
+						conn.writeColumns(result.fields.map(pg_to_my_field));
+						result.rows.forEach(r => conn.writeTextRow(pg_to_my_row(r)));
+						conn.writeEof();
+					} else if (ast.expr == 'INSERT' || ast.expr == 'UPDATE' || ast.expr == 'DELETE') {
 //console.log(result);
-				conn.writeOk({affectedRows:result.rowCount});
-			} else if (ast.expr == 'CREATE') {
-//console.log('create');
-				conn.writeOk();
-			}
+						conn.writeOk({affectedRows:result.rowCount});
+					} else if (ast.expr == 'CREATE') {
+						conn.writeOk();
+					}
+				})
+				.catch(err => {
+console.log();
+console.log('query: ' + query);
+console.log('sent: ' + sql);
+
+					var missing_table = err.message.match(/^relation "(.*)" does not exist$/);
+					if (missing_table)
+						return conn.writeError({code:1146, message:"Table '" + db.name + "." + missing_table[1] + "' doesn't exist"});
+
+console.log('error: ' + err.message);
+					// error code 1046 is no database selected, 1146 is table doesn't exist
+					return conn.writeError({ code: 0, message: err.message });
+				});
+		}).catch(err => {
+			console.log('got an error while translating');
+			console.log(err);
 		});
 	});
 });

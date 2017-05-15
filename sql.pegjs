@@ -1,15 +1,21 @@
 start = 
 	ws* s:(select_stmt / create_stmt / insert_stmt / update_stmt /
 			delete_single_table_stmt / delete_multi_table_stmt /
-			set_stmt / describe_stmt / show_tables_stmt ) ws* ";"?
+			set_stmt / describe_stmt /
+			show_tables_stmt / show_databases_stmt / show_full_columns_stmt
+		  ) ws* ";"?
 	{ return s }
 
-describe_stmt = "DESCRIBE"i ws+ t:ident { return { expr:'DESCRIBE', table:t } }
+show_full_columns_stmt = "SHOW"i ws+ "FULL"i ws+ "COLUMNS"i ws+ "FROM"i ws+ t:ident { return { expr:'SHOW', obj:'FULL COLUMNS', table:t } }
+
+show_databases_stmt = "SHOW"i ws+ "DATABASES"i { return { expr:'SHOW', obj:'DATABASES' } }
 
 show_tables_stmt = "SHOW"i ws+ "TABLES"i e:show_tables_like_or_where? { return { expr:'SHOW', obj:'TABLES', cond:e } }
 show_tables_like_or_where =
 	ws+ "LIKE"i ws+ l:literal { return { oper:'LIKE', value:l } }
   / ws+ "WHERE"i ws+ e:where_expression { return { oper:'WHERE', expr:e } }
+
+describe_stmt = "DESCRIBE"i ws+ t:ident { return { expr:'DESCRIBE', table:t } }
 
 set_stmt = "SET"i ws+ k:ident ws+ v:.* { return { expr:'SET', key:k, value:v.join('')} }
 
@@ -54,8 +60,8 @@ insert_stmt = "INSERT INTO"i ws+ t:field ws* "(" ws* f:field_list ws* ")" ws+ "V
 		}
 	}
 
-values_clause = "(" ws* v:list ws* ")" ws* { return v }
-values_clause2 = "," ws* v:values_clause { return v }
+values_clause = "(" ws* v:list ws* ")" { return v }
+values_clause2 = ws* "," ws* v:values_clause { return v }
 on_dupe_key_clause = ws+ "ON DUPLICATE KEY UPDATE"i ws+ f1:on_dupe_key_part f2:on_dupe_key_part2* { return [f1].concat(f2) }
 on_dupe_key_part = f:field ws* "=" ws* "VALUES" ws* "(" ws* v:field_or_literal_or_nullable ws* ")" { return { field:f, value:v } }
 on_dupe_key_part2 = ws* "," ws* p:on_dupe_key_part { return p }
@@ -186,15 +192,16 @@ fn_name = "MAX"i / "SUM"i / "AVERAGE"i / "COUNT"i /
 	"CONCAT"i / "SUBSTRING"i
 special_field = "@@[a-zA-Z_]+" / "DATABASE()"i / "FOUND_ROWS()"i
 
+keyword = "WHERE"i / "JOIN"i / "ON"i
 from_clause = ws+ "FROM"i ws+ t1:aliasable_table t2:aliasable_table2* { return [t1].concat(t2) }
 aliasable_table =
-	t:field ws+ "AS" ws+ a:ident { t.alias = a; return t; }
-  / t:field ws+ a:ident { t.alias = a; return t; }
+	t:field ws+ "AS" ws+ !keyword a:ident { t.alias = a; return t; }
+  / t:field ws+ !keyword a:ident { t.alias = a; return t; }
   / field
 aliasable_table2 = ws* "," ws* t:aliasable_table { return t }
 
 join_type = j:("LEFT"i / "RIGHT"i / "OUTER"i / "INNER"i) ws+ { return j }
-join_clause = ws h:join_type? "JOIN"i ws t:aliasable_table ws "ON"i ws e:where_expression
+join_clause = ws+ h:join_type? "JOIN"i ws+ t:aliasable_table ws "ON"i ws e:where_expression
 	{ return {type:h, table:t, expr:e} }
 
 where_clause = ws+ "WHERE"i ws+ w1:where_expression w2:where_expression2* { return [w1].concat(w2) }

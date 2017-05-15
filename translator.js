@@ -3,13 +3,15 @@ var PEG     = require("pegjs")
 var PEGUtil = require("pegjs-util")
 var parser  = PEG.generate(fs.readFileSync("sql.pegjs", "utf8"));
 
-var db = require('./pool').pool;
+var db = require('./pool');
 
-exports.parse_stmt = function(stmt)
+exports.parse_stmt = function(stmt, trace)
 {
-	var result = PEGUtil.parse(parser, stmt);
+	function trcr() { console.log(args); }
+
+	var result = PEGUtil.parse(parser, stmt, trace ? {tracer:trcr} : {});
 	if (result.error !== null) {
-		console.log("ERROR: Parsing Failure:\n" + PEGUtil.errorMessage(result.error, true).replace(/^/mg, "ERROR: "))
+		console.log("ERROR: Parsing Failure:\n" + stmt + "\n" + PEGUtil.errorMessage(result.error, true).replace(/^/mg, "ERROR: "))
 		return null;
 	}
 	return result.ast;
@@ -26,11 +28,34 @@ exports.ast_to_pgsql = function(ast)
 		case 'INSERT': return Promise.resolve(insert_to_pgsql(ast));
 		case 'UPDATE': return Promise.resolve(update_to_pgsql(ast));
 		case 'DELETE': return delete_to_pgsql(ast);
+		case 'SHOW'  : return Promise.resolve(show_to_pgsql(ast));
 		default: return Promise.reject('unknown expression: ' + ast.expr);
 	}
 }
 
-function field_list_str(field_list) {
+function show_to_pgsql(ast)
+{
+	if (ast.obj == 'DATABASES')
+		return 'SELECT datname FROM pg_database WHERE datistemplate = false';
+
+	if (ast.obj == 'FULL COLUMNS') {
+		// return Field, Type, Collation, Null (YES/NO), Key (PRI), Default, Extra
+		// collation is hardcoded to utf8mb4_unicode_ci even though it doesn't make sense for numbers and is wrong for blobs which are binary
+		return "SELECT f.attname AS Name, pg_catalog.format_type(f.atttypid,f.atttypmod) AS Type, 'utf8mb4_unicode_ci' AS Collation, CASE WHEN f.attnotnull THEN 'NO' ELSE 'YES' END AS NULL, CASE WHEN p.contype = 'p' THEN 'PRI' ELSE '' END AS Key, CASE WHEN f.atthasdef = 't' THEN d.adsrc END AS default, '' AS Extra FROM pg_attribute f JOIN pg_class c ON c.oid = f.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = f.attnum LEFT JOIN pg_namespace n ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON p.conrelid = c.oid AND f.attnum = ANY (p.conkey) WHERE c.relkind = 'r'::char AND f.attnum > 0 AND n.nspname = 'public' and c.relname = '" + ast.table + "'";
+	}
+
+	if (ast.obj == 'TABLES') {
+		if (!ast.cond)
+			return "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name";
+		else if (ast.cond.oper == 'LIKE')
+			return "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE " + ast.cond.value + " ORDER BY table_name";
+		else if (ast.cond.oper == 'WHERE')
+			return "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name AND " + translator.where_expr(ast.cond.expr) + " ORDER BY table_name";
+	}
+}
+
+function field_list_str(field_list)
+{
 	return field_list.map(f => field_str(f)).join(', ');
 }
 
@@ -85,51 +110,42 @@ function delete_to_pgsql(ast)
 	}
 	
 	return new Promise((resolve, reject) => {
-		// strategy: get primary key fields for all tables, find ids for rows to delete, delete rows
+		// step 1: find primary key for relevant tables -- only works with single field primary keys
 		var primary_key_fields = {};
 		var tables = ast.aliases.map(t => t.ident);
 		tables = tables.filter((el, pos) => tables.indexOf(el) == pos); // make unique
 		var promises = tables.map(t => {
 			var sql = "SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = $1::regclass AND i.indisprimary;";
-			var promise = db.query(sql, [t]);
-			promise = promise.then(res => {
+			return db.query(sql, [t]).then(res => {
+				if (res.rowCount > 1)
+					reject('unable to handle deletes on multiple tables where one of the tables has a multi field primary key');
 				primary_key_fields[t] = res.rows.map(r => r.attname);
 			});
-			return promise;
 		});
+
+		// step 2: find ids for rows to delete
 		var all = Promise.all(promises).then(v => {
-			//console.log(primary_key_fields);
-			var to_fetch = ast.tables.filter(t => ast.aliases.map(a => a.alias).includes(t));
-			var fetch_sqls = to_fetch.map(t => {
-				var table = ast.aliases.filter(a => a.alias).map(a => a.ident)[0];
-				var fields = primary_key_fields[table];
-				fields = fields.map(f => t + "." + f).join(', ');
-				return "SELECT " + fields + " FROM " + field_list_str(ast.aliases) + " WHERE " + where_clause(ast.where).join(' ');
+			var aliases = ast.tables.filter(t => ast.aliases.map(a => a.alias).includes(t));
+			var fetch_promises = aliases.map(t => {
+				var table_name = ast.aliases.filter(a => a.alias).map(a => a.ident)[0];
+				var key_fields = primary_key_fields[table_name];
+				key_fields = key_fields.map(f => t + "." + f).join(', ');
+				// run query to get primary of rows to be deleted
+				var sql = "SELECT " + key_fields + " FROM " + field_list_str(ast.aliases) + " WHERE " + where_clause(ast.where).join(' ');
+				return db.query(sql)
+					.then(result => {
+						// return query to delete relevant rows
+						if (result.rowCount == 0)
+							return '';
+						var values = result.rows.map(r => r[Object.keys(r)[0]] ); // assumes one field in primary key
+						return 'DELETE FROM ' + table_name + ' WHERE ' + primary_key_fields[table_name][0] + ' IN (' + values.join(',') + ')';
+					})
+					.catch(reject);
 			});
-			fetch_sqls.forEach(sql => {
-				db.query(sql, [], (err, result) => {
-					if (err) {
-						console.log('error: ' + err.message);
-						if (err.message.indexOf('operator does not exist: ') === 0) {
-							// comparison type mismatch
-							// find out the types
-							var types = err.message.substr('operator does not exist: '.length).split(' ');
-							// find first nonspace after error
-							var errorAt = parseInt(err.position, 10);
-							while (/\s/.test(sql[errorAt]))
-								errorAt += 1;
-							var remainder = sql.substr(errorAt);
-							var spaceAt = remainder.match(/[^ ] /).index+1;
-							var fixed = remainder.substr(0, spaceAt) + "::" + types[0] + remainder.substr(spaceAt);
-							sql = sql.substr(0, errorAt) + fixed;
-							console.log(sql);
-						}
-					}
-					console.log(result);
-				});
+			//console.log(fetch_ps);
+			Promise.all(fetch_promises).then(stmts => {
+				resolve(stmts.join('; '));
 			});
-			console.log(fetch_sqls);
-			resolve('done');
 		}).catch(reject);
 	});
 }
@@ -202,11 +218,12 @@ function insert_to_pgsql(ast)
 	parts.push('VALUES');
 	parts = parts.concat(ast.values.map(v => '(' + v.join(', ') + ')').join(', '));
 
+	// TODO: get primary key fields
 	if (ast.on_dupe_key) {
-		parts.push('ON DUPLICATE KEY UPDATE');
+		parts.push('ON CONFLICT (' + primary_key_fields[ast.table].join(', ') + ') DO UPDATE SET');
 		var odks = [];
 		ast.on_dupe_key.map(k => {
-			odks.push([ field_str(k.field), '=VALUES(', field_str(k.value), ')' ].join(''));
+			odks.push([ field_str(k.field), '=', field_str(k.value) ].join(''));
 		});
 		parts.push( odks.join(', ') );
 	}
@@ -266,7 +283,7 @@ function select_to_pgsql(ast)
 
 	if (ast.from) {
 		parts.push('FROM');
-		parts = parts.concat(field_str(ast.from));
+		parts = parts.concat(ast.from.map(field_str).join(', '));
 	}
 
 	ast.join.forEach(j => {
@@ -291,9 +308,9 @@ function select_to_pgsql(ast)
 		var orderby = [];
 		ast.orderby.forEach(function(ob) {
 			if (ob.order)
-				orderby.push(field_str(ob.field) + ' ' + ob.order);
+				orderby.push(field_str(ob) + ' ' + ob.order);
 			else
-				orderby.push(field_str(ob.field));
+				orderby.push(field_str(ob));
 		});
 		parts.push(orderby.join(', '));
 	}
