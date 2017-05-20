@@ -6,7 +6,7 @@ start =
 		  ) ws* ";"?
 	{ return s }
 
-show_full_columns_stmt = "SHOW"i ws+ "FULL"i ws+ "COLUMNS"i ws+ "FROM"i ws+ t:ident { return { expr:'SHOW', obj:'FULL COLUMNS', table:t } }
+show_full_columns_stmt = "SHOW"i ws+ "FULL"i ws+ "COLUMNS"i ws+ "FROM"i ws+ t:field { return { expr:'SHOW', obj:'FULL COLUMNS', table:t } }
 
 show_databases_stmt = "SHOW"i ws+ "DATABASES"i { return { expr:'SHOW', obj:'DATABASES' } }
 
@@ -15,7 +15,7 @@ show_tables_like_or_where =
 	ws+ "LIKE"i ws+ l:literal { return { oper:'LIKE', value:l } }
   / ws+ "WHERE"i ws+ e:where_expression { return { oper:'WHERE', expr:e } }
 
-describe_stmt = "DESCRIBE"i ws+ t:ident { return { expr:'DESCRIBE', table:t } }
+describe_stmt = "DESCRIBE"i ws+ t:ident { return { expr:'SHOW', obj:'COLUMNS', table:t } }
 
 set_stmt = "SET"i ws+ k:ident ws+ v:.* { return { expr:'SET', key:k, value:v.join('')} }
 
@@ -38,15 +38,16 @@ delete_single_table_stmt = "DELETE"i ws+ "FROM"i ws+ t:field w:where_clause
 		}
 	}
 
-update_stmt = "UPDATE"i ws+ t:ident ws+ "SET"i ws+ f1:update_clause f2:update_clause2*
+update_stmt = "UPDATE"i ws+ t:field ws+ "SET"i ws+ f1:update_clause f2:update_clause2* w:where_clause
 	{
 		return {
 			expr:'UPDATE',
 			table:t,
 			changes:[f1].concat(f2),
+			where:w,
 		}
 	}
-update_clause = f:ident ws* "=" ws* v:field_or_literal_or_nullable { return { field:f, value:v } }
+update_clause = f:field ws* "=" ws* v:field_or_literal_or_nullable { return { field:f, value:v } }
 update_clause2 = ws* "," ws* uc:update_clause { return uc }
 
 insert_stmt = "INSERT INTO"i ws+ t:field ws* "(" ws* f:field_list ws* ")" ws+ "VALUES"i ws* v1:values_clause v2:values_clause2* odk:on_dupe_key_clause?
@@ -209,7 +210,7 @@ where_expression =
 	f:field_or_literal_or_nullable ws* o:operator_and_value { return { field:f, oper:o.oper, value:o.value } }
   / "(" ws* w1:where_expression w2:where_expression2* ws* ")" { return [w1].concat(w2) }
 where_expression2 = ws+ c:("AND"i / "OR"i) ws+ e:where_expression { return { combiner:c, expr:e } }
-operator_binary = "=" / "<>" / "<" / ">" / "REGEXP"i / "LIKE"i / "NOT LIKE"i
+operator_binary = "=" / "<>" / "!=" / "<" / ">" / "REGEXP"i / "LIKE"i / "NOT LIKE"i
 operator_list = "IN"i / "NOT IN"i
 operator_and_value = o:operator_binary ws* v:field_or_literal_or_nullable { return { oper:o, value:v } } /
 					 o:operator_list ws* "(" ws* n:list ")" { return { oper:o, value:n } }
@@ -230,7 +231,8 @@ number = n:[0-9]+ { return parseInt(n.join(''), 10) }
 number_comma = "," ws* n:number { return n }
 number_list = n:number ws* c:number_comma* { return [n].concat(c) }
 
-literal = "'" l:$[^']* "'" { return "'" + l + "'" }
+literal = "'" l:$[^\\']* es:escaped_quote_clause* "'" { return "'" + l + es.join('') + "'" }
+escaped_quote_clause = "\\" s:. l:$[^\\']* { return s + l }
 
 nullable = "NULL"i / "NOT NULL"i
 literal_or_nullable = literal / number / nullable

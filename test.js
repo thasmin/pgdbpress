@@ -3,13 +3,10 @@
 var process    = require('process');
 var fs         = require('fs')
 var translator = require('./translator');
-
-var fs      = require('fs')
-var PEG     = require("pegjs")
-var parser = PEG.generate(fs.readFileSync("sql.pegjs", "utf8"));
+var db         = require('./pool');
 
 //*
-test_stmt("INSERT INTO `wp_options` (`option_name`, `option_value`, `autoload`) VALUES ('_transient_is_multi_author', '0', 'yes') ON DUPLICATE KEY UPDATE `option_name` = VALUES(`option_name`), `option_value` = VALUES(`option_value`), `autoload` = VALUES(`autoload`)");
+test_stmt("SELECT SQL_CALC_FOUND_ROWS  wp_posts.ID FROM wp_posts  WHERE 1=1  AND wp_posts.post_type = 'post' AND (wp_posts.post_status = 'publish' OR wp_posts.post_status = 'private')  ORDER BY wp_posts.post_date DESC LIMIT 0, 10");
 //*/
 
 /************************************/
@@ -49,18 +46,25 @@ function test_stmt(stmt, verbose)
 	if (!sql_p)
 		return;
 
-	sql_p.then((out_sql) => {
+	sql_p.then(result => {
 		console.log(stmt);
 		if (verbose) print_ast(ast);
-		console.log(out_sql);
 		console.log('---');
-	}).catch((e) => {
-		console.log(stmt);
+		console.log(result[0]);
+		console.log(result[1]);
+		/*
+		db.query(result[0], result[1])
+			.then((res) => { console.log('success in db'); })
+			.catch((e) => { console.log('error in db'); console.log(e); });
+		*/
+		console.log('===');
+		console.log();
+	}).catch(e => {
 		console.log(stmt);
 		if (verbose) print_ast(ast);
 		console.log('error');
 		console.log(e);
-		console.log('---');
+		console.log('===');
 	});
 }
 

@@ -53,6 +53,7 @@ console.log(err);
 	conn.on('query', function (query) {
 		// use this to avoid translating the ast
 		var pg_query = null;
+		var pg_params = [];
 
 		var query_lower = query.toLowerCase();
 		if (query_lower == 'select @@version_comment limit 1')
@@ -68,24 +69,24 @@ console.log(err);
 
 		if (ast.expr == 'SET')
 			return conn.writeOk();
-		if (ast.expr == 'DESCRIBE') {
-			// return Field, Type, Null (YES/NO), Key (PRI), Default, Extra
-			pg_query = "SELECT f.attname AS Name, pg_catalog.format_type(f.atttypid,f.atttypmod) AS Type, CASE WHEN f.attnotnull THEN 'NO' ELSE 'YES' END AS NULL, CASE WHEN p.contype = 'p' THEN 'PRI' ELSE '' END AS Key, CASE WHEN f.atthasdef = 't' THEN d.adsrc END AS default, '' AS Extra FROM pg_attribute f JOIN pg_class c ON c.oid = f.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = f.attnum LEFT JOIN pg_namespace n ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON p.conrelid = c.oid AND f.attnum = ANY (p.conkey) WHERE c.relkind = 'r'::char AND f.attnum > 0 AND n.nspname = 'public' and c.relname = '" + ast.table + "'";
-			ast.expr = 'SELECT';
-		}
 
+		var promise;
 		if (pg_query)
-			pg_query = Promise.resolve(pg_query);
+			promise = Promise.resolve([pg_query, pg_params]);
 		else
-			pg_query = translator.ast_to_pgsql(ast);
+			promise = translator.ast_to_pgsql(ast);
 
-		pg_query.then(sql => {
-			db.query(sql)
+		promise.then(r => {
+			var sql = r[0];
+			var params = r[1];
+
+			db.query(sql, params)
 				.then(result => {
 console.log();
 console.log('query: ' + query);
 console.log('sent: ' + sql);
-					if (['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN'].includes(ast.expr)) {
+if (params.length > 0) console.log(params);
+					if (['SELECT', 'SHOW', 'EXPLAIN'].includes(ast.expr)) {
 //console.log(result.rows);
 						conn.writeColumns(result.fields.map(pg_to_my_field));
 						result.rows.forEach(r => conn.writeTextRow(pg_to_my_row(r)));
@@ -101,6 +102,7 @@ console.log('sent: ' + sql);
 console.log();
 console.log('query: ' + query);
 console.log('sent: ' + sql);
+if (params.length > 0) console.log(params);
 
 					var missing_table = err.message.match(/^relation "(.*)" does not exist$/);
 					if (missing_table)
@@ -111,6 +113,10 @@ console.log('error: ' + err.message);
 					return conn.writeError({ code: 0, message: err.message });
 				});
 		}).catch(err => {
+console.log();
+console.log('query: ' + query);
+console.log('sent: ' + sql);
+if (params.length > 0) console.log(params);
 			console.log('got an error while translating');
 			console.log(err);
 		});
