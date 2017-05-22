@@ -45,14 +45,14 @@ function show_to_pgsql(ast)
 		// return Field, Type, Collation, Null (YES/NO), Key (PRI), Default, Extra
 		// collation is hardcoded to utf8mb4_unicode_ci even though it doesn't make sense for numbers and is wrong for blobs which are binary
 		return ["SELECT f.attname AS \"Field\", pg_catalog.format_type(f.atttypid,f.atttypmod) AS \"Type\", 'utf8mb4_unicode_ci' AS \"Collation\", CASE WHEN f.attnotnull THEN 'NO' ELSE 'YES' END AS \"Null\", CASE WHEN p.contype = 'p' THEN 'PRI' ELSE '' END AS \"Key\", CASE WHEN f.atthasdef = 't' THEN d.adsrc END AS \"Default\", '' AS \"Extra\" FROM pg_attribute f JOIN pg_class c ON c.oid = f.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = f.attnum LEFT JOIN pg_namespace n ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON p.conrelid = c.oid AND f.attnum = ANY (p.conkey) WHERE c.relkind = 'r'::char AND f.attnum > 0 AND n.nspname = 'public' and c.relname = $1",
-			[field_str(ast.table)]
+			[unquoteize(field_str(ast.table))]
 		];
 	}
 
 	if (ast.obj == 'COLUMNS') {
 		// return Field, Type, Null (YES/NO), Key (PRI), Default, Extra
 		return ["SELECT f.attname AS \"Field\", pg_catalog.format_type(f.atttypid,f.atttypmod) AS \"Type\", CASE WHEN f.attnotnull THEN 'NO' ELSE 'YES' END AS \"Null\", CASE WHEN p.contype = 'p' THEN 'PRI' ELSE '' END AS \"Key\", CASE WHEN f.atthasdef = 't' THEN d.adsrc END AS \"Default\", '' AS \"Extra\" FROM pg_attribute f JOIN pg_class c ON c.oid = f.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = f.attnum LEFT JOIN pg_namespace n ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON p.conrelid = c.oid AND f.attnum = ANY (p.conkey) WHERE c.relkind = 'r'::char AND f.attnum > 0 AND n.nspname = 'public' and c.relname = $1",
-			[field_str(ast.table)]
+			[unquoteize(field_str(ast.table))]
 		];
 }
 
@@ -78,16 +78,30 @@ function field_str(field)
 	return field_str_inner(field);
 }
 
+function dqnostar(str)
+{
+	if (str == '*')
+		return str;
+	return dq(str);
+}
+
 function field_str_inner(field)
 {
-	if (field.fn)
-		return field.fn + "(" + field.args.map(field_str).join(', ') + ")";
-	if (field.aggregate)
-		return field.aggregate + '(' + field_str(field.field) + ')';
+	var extract_date_fxns = ['YEAR', 'MONTH', 'DAY'];
+
+	if (field.oper)
+		return where_expr(field).join(' ');
+	if (field.fn) {
+		if (extract_date_fxns.includes(field.fn.toUpperCase()))
+			return 'EXTRACT(' + field.fn.toUpperCase() + ' FROM ' + field.args.map(field_str).join(', ') + ')';
+		return field.fn + '(' + field.args.map(field_str).join(', ') + ')';
+	}
 	if (field.table)
-		return field.table + '.' + field.ident;
-	if (field.ident)
+		return field.table + '.' + dqnostar(field.ident);
+	if (field.ident == 'true' || field.ident == 'false')
 		return field.ident;
+	if (field.ident)
+		return dqnostar(field.ident);
 	return field;
 }
 
@@ -101,7 +115,7 @@ function datatype_str(dt)
 		case 'INT':
 			return t;
 		case 'VARCHAR':
-			return t + "(" + dt.size + ")";
+			return t + '(' + dt.size + ')';
 		case 'LONGTEXT':
 		case 'MEDIUMTEXT':
 		case 'TINYTEXT':
@@ -122,10 +136,15 @@ function get_primary_key_fields(tables)
 		return Promise.resolve(tables);
 
 	return Promise.all(tables.map(t => {
-		var sql = "SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = $1::regclass AND i.indisprimary;";
+		var sql = 'SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = $1::regclass AND i.indisprimary;';
 		return db.query(sql, [t]).then(res => {
-			primary_key_fields[t] = res.rows.map(r => r.attname);
+			primary_key_fields[t] = res.rows.map(r => r[0]);
+			console.log(primary_key_fields);
+		}).catch(e => {
+			console.log('error getting primary key field names');
+			console.log(e);
 		});
+
 	}));
 }
 
@@ -134,8 +153,8 @@ function get_unique_key_field_name(table)
 {
 	//sql = "SELECT conname FROM pg_constraint WHERE conrelid = (SELECT oid FROM pg_class WHERE relname LIKE $1) AND contype = 'u'";
 	// probably not the best way to get it
-	sql = "SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = $1::regclass AND NOT i.indisprimary"
-	return db.query(sql, [table]).then(res => res.rows[0].attname).catch(err => null);
+	sql = 'SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = $1::regclass AND NOT i.indisprimary'
+	return db.query(sql, [table]).then(res => res.rows[0][0]).catch(err => { console.log('error getting unique key field name'); console.log(err); });
 }
 
 function delete_to_pgsql(ast)
@@ -155,9 +174,9 @@ function delete_to_pgsql(ast)
 			var fetch_promises = aliases.map(t => {
 				var table_name = ast.aliases.filter(a => a.alias).map(a => a.ident)[0];
 				var key_fields = primary_key_fields[table_name];
-				key_fields = key_fields.map(f => t + "." + f).join(', ');
+				key_fields = key_fields.map(f => t + '.' + f).join(', ');
 				// run query to get primary of rows to be deleted
-				var sql = "SELECT " + key_fields + " FROM " + field_list_str(ast.aliases) + " WHERE " + where_clause(ast.where).join(' ');
+				var sql = 'SELECT ' + key_fields + ' FROM ' + field_list_str(ast.aliases) + ' WHERE ' + where_clause(ast.where).join(' ');
 				return db.query(sql)
 					.then(result => {
 						// return query to delete relevant rows
@@ -180,6 +199,11 @@ function handle_result(err, result)
 {
 }
 
+function dq(str)
+{
+	return '"' + str + '"';
+}
+
 function create_to_pgsql(ast)
 {
 	var parts = ['CREATE TABLE'];
@@ -190,7 +214,7 @@ function create_to_pgsql(ast)
 	ast.def.fields.forEach(field => {
 		var f = [];
 		// name, datatype, can_be_null, auto_increment
-		f.push(field.name);
+		f.push(dq(field.name));
 		if (field.auto_increment)
 			f.push('SERIAL')
 		else
@@ -209,10 +233,10 @@ function create_to_pgsql(ast)
 	ast.def.keys.forEach(key => {
 		switch (key.type) {
 			case 'PRIMARY':
-				keys_str.push('PRIMARY KEY (' + key.fields.map(f => f.field).join(',') + ')');
+				keys_str.push('PRIMARY KEY (' + key.fields.map(f => dq(f.field)).join(',') + ')');
 				break;
 			case 'UNIQUE':
-				keys_str.push('UNIQUE (' + key.fields.map(f => f.field).join(',') + ')');
+				keys_str.push('UNIQUE (' + key.fields.map(f => dq(f.field)) + ')');
 				break;
 		}
 	});
@@ -225,11 +249,11 @@ function create_to_pgsql(ast)
 
 	ast.def.keys.filter(key => key.type == 'INDEX').forEach(key => {
 		var index_str = ['CREATE INDEX'];
-		index_str.push(ast.table + "_" + key.name);
+		index_str.push(ast.table + '_' + key.name);
 		index_str.push('ON');
 		index_str.push(ast.table);
 		index_str.push('(');
-		index_str.push(key.fields.map(f => f.field).join(','));
+		index_str.push(key.fields.map(f => dq(f.field)).join(','));
 		index_str.push(');');
 		parts.push(index_str.join(' '));
 	});
@@ -258,10 +282,13 @@ function insert_to_pgsql(ast)
 			parts.push('ON CONFLICT (' + key_name + ') DO UPDATE SET');
 			var odks = [];
 			ast.on_dupe_key.map(k => {
-				odks.push([ field_str(k.field), '=', 'excluded.' + field_str(k.value) ].join(''));
+				odks.push([ field_str(k.field), '=', 'excluded.' + unquoteize(field_str(k.value)) ].join(''));
 			});
 			parts.push( odks.join(', ') );
 			return Promise.resolve([parts.join(' ') + ';', flat_values]);
+		}).catch(e => {
+			console.log('error getting unique key field name');
+			console.log(e);
 		});
 	}
 
@@ -271,9 +298,11 @@ function insert_to_pgsql(ast)
 // TODO?: change parser so it doesn't return quotes with literals
 function unquoteize(str)
 {
-	if (str[0] != "'" || str[str.length-1] != "'")
-		return str;
-	return str.substring(1, str.length-1);
+	if (str[0] == "'" || str[str.length-1] == "'")
+		return unquoteize(str.substring(1, str.length-1));
+	if (str[0] == '"' || str[str.length-1] == '"')
+		return unquoteize(str.substring(1, str.length-1));
+	return str;
 }
 
 function update_to_pgsql(ast)
@@ -332,10 +361,11 @@ function where_clause(w) {
 function select_to_pgsql(ast)
 {
 	var parts = ['SELECT'];
-	if (ast.calc_found_rows)
-		parts.push('SQL_CALC_FOUND_ROWS');
 	if (ast.distinct)
 		parts.push('DISTINCT');
+
+	if (ast.calc_found_rows)
+		ast.fields.push('COUNT(*) OVER() AS _translator_full_count');
 	parts.push(ast.fields.map(field_str).join(', '));
 
 	if (ast.from) {
@@ -361,18 +391,22 @@ function select_to_pgsql(ast)
 	}
 
 	if (ast.orderby) {
+		var orderby = ast.orderby.map(ob => ob.order ? field_str(ob) + ' ' + ob.order : field_str(ob)).join(', ');
+
+		// special case: grouping posts by year/month
+		if (ast.groupby && ast.groupby.map(field_str).join(', ') == 'EXTRACT(YEAR FROM "post_date"), EXTRACT(MONTH FROM "post_date")' && orderby == '"post_date" DESC')
+			orderby = ast.groupby.map(field_str).join(', ');
+
+		console.log(orderby);
 		parts.push('ORDER BY');
-		var orderby = ast.orderby.map(ob => ob.order ? field_str(ob) + ' ' + ob.order : field_str(ob));
-		parts.push(orderby.join(', '));
+		parts.push(orderby);
 	}
 
 	if (ast.limit) {
-		parts.push('LIMIT');
-		parts.push(ast.limit.first);
-		if (ast.limit.second) {
-			parts.push(',');
-			parts.push(ast.limit.second);
-		}
+		if (ast.limit.second)
+			parts = parts.concat(['LIMIT', ast.limit.second, 'OFFSET', ast.limit.first]);
+		else
+			parts = parts.concat(['LIMIT', ast.limit.first]);
 	}
 
 	return parts.join(' ') + ';';

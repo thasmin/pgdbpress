@@ -91,7 +91,7 @@ create_field_def = ws* n:ident ws d:create_column_def ws* { var obj = {name:n}; 
 create_column_def = d:datatype o:create_column_opt* ws*
 	{
 		var uppers = o.map(s => s.toUpperCase().replace("_", ""));
-		var defAt = uppers.find(u => u.startsWith('DEFAULT '));
+		var defAt = o.find(u => u.toUpperCase().startsWith('DEFAULT '));
 		var def = defAt && defAt.substr(8);
 		return {
 			datatype:d,
@@ -180,17 +180,18 @@ select_field =
 select_field2 = "," ws* f:select_field { return f }
 select_field_noalias =
 	"*"
+  / e:where_expression { return e }
   / s:special_field { return {ident:s} }
-  / a:fn_name ws* "(" ws* f:select_field ws* ")" { return { aggregate:a, field:f } }
-  / t:ident "." i:ident { return {table:t, ident:i} }
+  / a:fn_name ws* "(" ws* f:select_field f2:select_field2* ws* ")" { return { fn:a, args:[f].concat(f2) } }
   / t:ident ".*" { return {table:t, ident:'*'} }
-  / i:ident { return {ident:i} }
+  / f:field { return f }
 
 sql_calc_found_rows = "SQL_CALC_FOUND_ROWS"i ws+ { return true }
 distinct = "DISTINCT"i ws+ { return true }
 fn_name = "MAX"i / "SUM"i / "AVERAGE"i / "COUNT"i /
 	"YEAR"i / "MONTH"i / "DAY"i /
-	"CONCAT"i / "SUBSTRING"i
+	"CONCAT"i / "SUBSTRING"i /
+	"NULLIF"i
 special_field = "@@[a-zA-Z_]+" / "DATABASE()"i / "FOUND_ROWS()"i
 
 keyword = "WHERE"i / "JOIN"i / "ON"i

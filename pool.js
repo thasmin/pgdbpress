@@ -37,7 +37,7 @@ exports.query = function(sql, args)
 //console.log('querying: ' + sql);
 		if (!args)
 			args = [];
-		pool.query(sql, args)
+		pool.query({text: sql, values: args, rowMode: 'array'})
 			.then(resolve)
 			//.then(result => { console.log(n + " got a result"); resolve(result); })
 			.catch(err => { handleError(resolve, reject, sql, args, err); });

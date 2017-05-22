@@ -6,3 +6,6 @@ UPDATE `wp_options` SET `option_value` = 'Translator' WHERE `option_name` = 'blo
 INSERT INTO test(name) VALUES('single\'quote')
 INSERT INTO table (c1, c2, c3) VALUES ('v1', 2, 'v3'), ('v4', 5, 'v6'), ('v7', 8, 'v9')
 DESCRIBE table
+SELECT YEAR(post_date) AS `year`, MONTH(post_date) AS `month`, count(ID) as posts FROM wp_posts WHERE post_type = 'post' AND post_status = 'publish' GROUP BY YEAR(post_date), MONTH(post_date) ORDER BY post_date DESC -- should change orderby to match groupby
+SELECT p.ID, post_status, p.* FROM wp_posts p
+CREATE TABLE table(c varchar(50) NOT NULL default 'lowercase')

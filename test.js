@@ -6,7 +6,7 @@ var translator = require('./translator');
 var db         = require('./pool');
 
 //*
-test_stmt("SELECT SQL_CALC_FOUND_ROWS  wp_posts.ID FROM wp_posts  WHERE 1=1  AND wp_posts.post_type = 'post' AND (wp_posts.post_status = 'publish' OR wp_posts.post_status = 'private')  ORDER BY wp_posts.post_date DESC LIMIT 0, 10");
+test_stmt("INSERT INTO `wp_options` (`option_name`, `option_value`, `autoload`) VALUES ('wp_user_roles', 'a:1:{s:13:\"administrator\";a:2:{s:4:\"name\";s:13:\"Administrator\";s:12:\"capabilities\";a:0:{}}}', 'yes') ON DUPLICATE KEY UPDATE `option_name` = VALUES(`option_name`), `option_value` = VALUES(`option_value`), `autoload` = VALUES(`autoload`)"); 
 //*/
 
 /************************************/
@@ -36,7 +36,7 @@ function print_ast(ast)
 	console.log(JSON.stringify(clean_obj(ast), null, 2));
 }
 
-function test_stmt(stmt, verbose)
+function test_stmt(stmt, match)
 {
 	var ast = translator.parse_stmt(stmt, true);
 	if (!ast)
@@ -48,10 +48,15 @@ function test_stmt(stmt, verbose)
 
 	sql_p.then(result => {
 		console.log(stmt);
-		if (verbose) print_ast(ast);
+		//console.log(ast);
 		console.log('---');
 		console.log(result[0]);
-		console.log(result[1]);
+		if (result[1].length > 0)
+			console.log(result[1]);
+		if (match) {
+			console.log(match);
+			console.log(result[0] == match ? 'success' : 'no match');
+		}
 		/*
 		db.query(result[0], result[1])
 			.then((res) => { console.log('success in db'); })
@@ -61,7 +66,6 @@ function test_stmt(stmt, verbose)
 		console.log();
 	}).catch(e => {
 		console.log(stmt);
-		if (verbose) print_ast(ast);
 		console.log('error');
 		console.log(e);
 		console.log('===');
