@@ -194,7 +194,7 @@ fn_name = "MAX"i / "SUM"i / "AVERAGE"i / "COUNT"i /
 	"NULLIF"i
 special_field = "@@[a-zA-Z_]+" / "DATABASE()"i / "FOUND_ROWS()"i
 
-keyword = "WHERE"i / "JOIN"i / "ON"i
+keyword = "LIMIT"i / "ORDER"i / "GROUP"i / "WHERE"i / "JOIN"i / "ON"i
 from_clause = ws+ "FROM"i ws+ t1:aliasable_table t2:aliasable_table2* { return [t1].concat(t2) }
 aliasable_table =
 	t:field ws+ "AS" ws+ !keyword a:ident { t.alias = a; return t; }

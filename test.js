@@ -6,7 +6,10 @@ var translator = require('./translator');
 var db         = require('./pool');
 
 //*
-test_stmt("INSERT INTO `wp_options` (`option_name`, `option_value`, `autoload`) VALUES ('wp_user_roles', 'a:1:{s:13:\"administrator\";a:2:{s:4:\"name\";s:13:\"Administrator\";s:12:\"capabilities\";a:0:{}}}', 'yes') ON DUPLICATE KEY UPDATE `option_name` = VALUES(`option_name`), `option_value` = VALUES(`option_value`), `autoload` = VALUES(`autoload`)"); 
+test_stmt("SELECT comment_approved, COUNT( * ) AS total \
+			FROM wp_comments \
+	\
+			GROUP BY comment_approved"); 
 //*/
 
 /************************************/

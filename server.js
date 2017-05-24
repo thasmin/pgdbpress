@@ -64,6 +64,7 @@ console.log(err);
 		if (commandCode == 1) {
 			console.log('closing connection');
 			conn.close();
+			return;
 		}
 		console.log('got a non query');
 		console.log(knownCommand);
@@ -133,7 +134,21 @@ console.log('calced rows:' + last_calc_found_rows);
 						conn.writeColumns(result.fields.map(pg_to_my_field));
 						result.rows.forEach(r => conn.writeTextRow(r));
 						conn.writeEof();
-					} else if (ast.expr == 'INSERT' || ast.expr == 'UPDATE' || ast.expr == 'DELETE') {
+					} else if (ast.expr == 'INSERT') {
+//console.log(result);
+						//TODO: test this
+						var affectedRows = result.rowCount;
+						db.query('SELECT LASTVAL()', []).then(lastval_result =>  {
+console.log('lastval: ' + lastval_result.rows[0][0]);
+							if (lastval_result.rows.length > 0)
+								conn.writeOk({affectedRows:affectedRows, insertId:lastval_result.rows[0][0]});
+							else
+								conn.writeOk({affectedRows:affectedRows});
+						}).catch(e => {
+console.log('no lastval available');
+							conn.writeOk({affectedRows:affectedRows});
+						});
+					} else if (ast.expr == 'UPDATE' || ast.expr == 'DELETE') {
 //console.log(result);
 						conn.writeOk({affectedRows:result.rowCount});
 					} else if (ast.expr == 'CREATE') {
