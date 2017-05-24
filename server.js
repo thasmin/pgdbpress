@@ -30,7 +30,8 @@ var last_calc_found_rows = -1;
 
 var server = mysql.createServer();
 console.log('listening');
-server.listen(3333);
+var port = process.argv[2] || 6446;
+server.listen(port);
 server.on('connection', function (conn) {
 
 	// we can deny connection here:
