@@ -27,6 +27,7 @@ This project would have been more difficult if it were attempting to use MySQL d
 - SQL_CALC_FOUND_ROWS and FOUND_ROWS(): MySQL uses this to determine the full number of rows when including a LIMIT clause. PGdb Press needs to modify the query to include an additional column OVER() and then caches that value for when another query requests the FOUND_ROWS() column.
 - DESCRIBE and SHOW statements: MySQL has easy ways to determine the structure of a table. Wordpress uses these statements often. PGdb Press uses PostgreSQL system tables to supply this data.
 - UPSERTS: MySQL has a ON DUPLICATE KEY clause that allows an INSERT statement to UPDATE rows if the new data causes problems with constraints like unique keys. PostgreSQL has a similar feature ON CONFLICT DO UPDATE but the names of the fields in the unique key must be specified. PGdb Press uses PostgreSQL system tables to find the fields in a unique key on the relevant table and uses that. This is imperfect because there may be multiple unique keys, but it works for the limited use cases in Wordpress.
+- PostgreSQL is more strict about types in comparisons. It doesn't want to compare a varchar to an int. PGdb Press detects this error message and attempts to cast the parameter to the expected type. This may not work in all cases but it does work for Wordpress core.
 
 ## License
 The current license is GPL3. This is probably overly restrictive for this type of application. It will probably change in the future. Please feel free to email me or open an issue regarding the license.
