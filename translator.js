@@ -3,7 +3,12 @@ var PEG     = require("pegjs")
 var PEGUtil = require("pegjs-util")
 var parser  = PEG.generate(fs.readFileSync("sql.pegjs", "utf8"));
 
-var db = require('./pool');
+var db = null;
+
+exports.init = function(init_db)
+{
+	db = init_db;
+}
 
 exports.parse_stmt = function(stmt)
 {
@@ -139,7 +144,6 @@ function get_primary_key_fields(tables)
 		var sql = 'SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = $1::regclass AND i.indisprimary;';
 		return db.query(sql, [t]).then(res => {
 			primary_key_fields[t] = res.rows.map(r => r[0]);
-			console.log(primary_key_fields);
 		}).catch(e => {
 			console.log('error getting primary key field names');
 			console.log(e);
@@ -154,7 +158,12 @@ function get_unique_key_field_name(table)
 	//sql = "SELECT conname FROM pg_constraint WHERE conrelid = (SELECT oid FROM pg_class WHERE relname LIKE $1) AND contype = 'u'";
 	// probably not the best way to get it
 	sql = 'SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = $1::regclass AND NOT i.indisprimary'
-	return db.query(sql, [table]).then(res => res.rows[0][0]).catch(err => { console.log('error getting unique key field name'); console.log(err); });
+	return db.query(sql, [table])
+		.then(res => res.rows[0][0])
+		.catch(err => {
+			console.log('error getting unique key field name');
+			console.log(err);
+		});
 }
 
 function delete_to_pgsql(ast)
@@ -187,7 +196,6 @@ function delete_to_pgsql(ast)
 					})
 					.catch(reject);
 			});
-			//console.log(fetch_ps);
 			Promise.all(fetch_promises).then(stmts => {
 				resolve([stmts.join('; '), []]);
 			});
@@ -397,7 +405,6 @@ function select_to_pgsql(ast)
 		if (ast.groupby && ast.groupby.map(field_str).join(', ') == 'EXTRACT(YEAR FROM "post_date"), EXTRACT(MONTH FROM "post_date")' && orderby == '"post_date" DESC')
 			orderby = ast.groupby.map(field_str).join(', ');
 
-		console.log(orderby);
 		parts.push('ORDER BY');
 		parts.push(orderby);
 	}

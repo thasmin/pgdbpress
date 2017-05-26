@@ -2,16 +2,15 @@ var mysql = require('mysql2');
 var flags = require('mysql2/lib/constants/client.js');
 var auth = require('mysql2/lib/auth_41.js');
 
-var translator = require('./translator');
+var config = require('./config.json');
 var db = require('./pool');
+var translator = require('./translator');
 
 // YEAR and MONTH polyfills
 //db.query("CREATE OR REPLACE FUNCTION year(TIMESTAMP WITHOUT TIME ZONE) RETURNS INTEGER AS 'SELECT EXTRACT(year FROM $1)::integer;' LANGUAGE SQL IMMUTABLE RETURNS NULL ON NULL INPUT", []);
 //db.query("CREATE OR REPLACE FUNCTION month(TIMESTAMP WITHOUT TIME ZONE) RETURNS INTEGER AS 'SELECT EXTRACT(month FROM $1)::integer;' LANGUAGE SQL IMMUTABLE RETURNS NULL ON NULL INPUT", []);
 
 function authenticate (params, cb) {
-	//console.log(params);
-
 	// accept anything
 	cb(null);
 	return;
@@ -30,7 +29,7 @@ var last_calc_found_rows = -1;
 
 var server = mysql.createServer();
 console.log('listening');
-var port = process.argv[2] || 6446;
+var port = config.port || 6446;
 server.listen(port);
 server.on('connection', function (conn) {
 
@@ -60,8 +59,20 @@ console.log(err);
 	});
 
 	conn.on('packet', function(packet, knownCommand, commandCode) {
-		if (commandCode == 3) // query
+		// query is handled in the query event
+		if (commandCode == 3)
 			return;
+
+		// init db
+		if (commandCode == 2) { 
+			packet.skip(1);
+			var db_name = packet.readNullTerminatedString(conn.clientHelloReply.encoding);
+			db.open(config, db_name);
+			translator.init(db);
+			return;
+		}
+
+		// quit
 		if (commandCode == 1) {
 			console.log('closing connection');
 			conn.close();
@@ -103,7 +114,7 @@ console.log(err);
 
 		// there's one query that's locally cached
 		if (ast.expr == 'SELECT' && ast.fields.length == 1 && ast.fields[0].ident == 'FOUND_ROWS()') {
-console.log('sending back calced rows: ' + last_calc_found_rows);
+//console.log('sending back calced rows: ' + last_calc_found_rows);
 			conn.writeColumns([ my_col(ast.fields[0].ident) ]);
 			conn.writeTextRow([ last_calc_found_rows ]);
 			return conn.writeEof();
@@ -121,15 +132,15 @@ console.log('sending back calced rows: ' + last_calc_found_rows);
 
 			db.query(sql, params)
 				.then(result => {
-console.log();
-console.log('query: ' + query);
-console.log('sent: ' + sql);
-if (params.length > 0) console.log(params);
+//console.log();
+//console.log('query: ' + query);
+//console.log('sent: ' + sql);
+//if (params.length > 0) console.log(params);
 					if (['SELECT', 'SHOW', 'EXPLAIN'].includes(ast.expr)) {
 //console.log(result.rows);
 						if (result.rows.length > 0 && result.rows[0]['_translator_full_count']) {
 							last_calc_found_rows = result.rows[0]['_translator_full_count'];
-console.log('calced rows:' + last_calc_found_rows);
+//console.log('calced rows:' + last_calc_found_rows);
 						}
 //console.log('writing ' + result.fields.length + ' columns');
 						conn.writeColumns(result.fields.map(pg_to_my_field));
@@ -140,13 +151,13 @@ console.log('calced rows:' + last_calc_found_rows);
 						//TODO: test this
 						var affectedRows = result.rowCount;
 						db.query('SELECT LASTVAL()', []).then(lastval_result =>  {
-console.log('lastval: ' + lastval_result.rows[0][0]);
+//console.log('lastval: ' + lastval_result.rows[0][0]);
 							if (lastval_result.rows.length > 0)
 								conn.writeOk({affectedRows:affectedRows, insertId:lastval_result.rows[0][0]});
 							else
 								conn.writeOk({affectedRows:affectedRows});
 						}).catch(e => {
-console.log('no lastval available');
+//console.log('no lastval available');
 							conn.writeOk({affectedRows:affectedRows});
 						});
 					} else if (ast.expr == 'UPDATE' || ast.expr == 'DELETE') {
@@ -167,6 +178,7 @@ if (params.length > 0) console.log(params);
 						return conn.writeError({code:1146, message:"Table '" + db.name + "." + missing_table[1] + "' doesn't exist"});
 
 console.log('error: ' + err.message);
+console.log(err);
 					// error code 1046 is no database selected, 1146 is table doesn't exist
 					return conn.writeError({ code: 0, message: err.message });
 				});

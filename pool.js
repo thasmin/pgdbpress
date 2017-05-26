@@ -1,35 +1,44 @@
 var Pool = require('pg').Pool;
-var db_name = exports.name = 'translator';
-var pool = new Pool({
-	host: 'localhost',
-	user: 'translator',
-	password: 'translator',
-	database: db_name,
-});
 
-function handleError(resolve, reject, sql, args, err) {
+var pool = null;
+exports.name = null;
+
+exports.open = function(config, db_name)
+{
+	exports.name = db_name;
+	var opts = {
+		host: config.host,
+		user: config.user,
+		password: config.password,
+		database: db_name,
+	};
+	pool = new Pool(opts);
+}
+
+function handleError(resolve, reject, sql, args, err)
+{
 //console.log(n + ' got a sql error: ' + err.message);
-				// attempt to fix comparison mismatch errors
-				if (err.message.indexOf('operator does not exist: ') === 0) {
-					// comparison type mismatch
-					// find out the types
-					var types = err.message.substr('operator does not exist: '.length).split(' ');
-					// find first nonspace after error
-					var errorAt = parseInt(err.position, 10);
-					while (/\s/.test(sql[errorAt]))
-						errorAt += 1;
-					var remainder = sql.substr(errorAt);
-					var spaceAt = remainder.match(/[^ ] /).index+1;
-					var fixed = remainder.substr(0, spaceAt) + "::" + types[0] + remainder.substr(spaceAt);
-					sql = sql.substr(0, errorAt) + fixed;
+	// attempt to fix comparison mismatch errors
+	if (err.message.indexOf('operator does not exist: ') === 0) {
+		// comparison type mismatch
+		// find out the types
+		var types = err.message.substr('operator does not exist: '.length).split(' ');
+		// find first nonspace after error
+		var errorAt = parseInt(err.position, 10);
+		while (/\s/.test(sql[errorAt]))
+			errorAt += 1;
+		var remainder = sql.substr(errorAt);
+		var spaceAt = remainder.match(/[^ ] /).index+1;
+		var fixed = remainder.substr(0, spaceAt) + "::" + types[0] + remainder.substr(spaceAt);
+		sql = sql.substr(0, errorAt) + fixed;
 //console.log(sql);
-					exports.query(sql, args)
-						.then(resolve)
-						.catch(err => { handleError(resolve, reject, sql, args, err); });
-				} else {
-					reject(err);
-				}
-			}
+		exports.query(sql, args)
+			.then(resolve)
+			.catch(err => { handleError(resolve, reject, sql, args, err); });
+	} else {
+		reject(err);
+	}
+}
 
 exports.query = function(sql, args)
 {
