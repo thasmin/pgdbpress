@@ -50,10 +50,11 @@ update_stmt = "UPDATE"i ws+ t:field ws+ "SET"i ws+ f1:update_clause f2:update_cl
 update_clause = f:field ws* "=" ws* v:field_or_literal_or_nullable { return { field:f, value:v } }
 update_clause2 = ws* "," ws* uc:update_clause { return uc }
 
-insert_stmt = "INSERT INTO"i ws+ t:field ws* "(" ws* f:field_list ws* ")" ws+ "VALUES"i ws* v1:values_clause v2:values_clause2* odk:on_dupe_key_clause?
+insert_stmt = "INSERT" ws+ ig:ignore_clause? "INTO"i ws+ t:field ws* "(" ws* f:field_list ws* ")" ws+ "VALUES"i ws* v1:values_clause v2:values_clause2* odk:on_dupe_key_clause?
 	{
 		return {
 			expr:'INSERT',
+			ignore:!!ig,
 			table:t,
 			fields:f,
 			values:[v1].concat(v2),
@@ -61,6 +62,7 @@ insert_stmt = "INSERT INTO"i ws+ t:field ws* "(" ws* f:field_list ws* ")" ws+ "V
 		}
 	}
 
+ignore_clause = "IGNORE"i ws+
 values_clause = "(" ws* v:list ws* ")" { return v }
 values_clause2 = ws* "," ws* v:values_clause { return v }
 on_dupe_key_clause = ws+ "ON DUPLICATE KEY UPDATE"i ws+ f1:on_dupe_key_part f2:on_dupe_key_part2* { return [f1].concat(f2) }
@@ -226,7 +228,10 @@ limit_clause =
 
 
 
-ws "whitespace" = [ \t\n\r]+
+ws = (ws_chars / multiline_comment)+
+ws_chars = [ \t\n\r]+
+multiline_comment = "/*" ([^*]*)? multiline_comment2*
+multiline_comment2 = "*/" / "*" [^*]+
 
 number = n:[0-9]+ { return parseInt(n.join(''), 10) }
 number_comma = "," ws* n:number { return n }

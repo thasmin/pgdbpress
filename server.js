@@ -2,7 +2,8 @@ var mysql = require('mysql2');
 var flags = require('mysql2/lib/constants/client.js');
 var auth = require('mysql2/lib/auth_41.js');
 
-var config = require('./config.json');
+var config_file = process.argv[2] || './config.json';
+var config = require(config_file);
 var db = require('./pool');
 var translator = require('./translator');
 
@@ -168,6 +169,8 @@ console.log(err);
 					}
 				})
 				.catch(err => {
+					if (ast.expr == 'INSERT' && ast.ignore)
+						return;
 console.log();
 console.log('query: ' + query);
 console.log('sent: ' + sql);

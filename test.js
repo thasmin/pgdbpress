@@ -6,10 +6,7 @@ var translator = require('./translator');
 var db         = require('./pool');
 
 //*
-test_stmt("SELECT comment_approved, COUNT( * ) AS total \
-			FROM wp_comments \
-	\
-			GROUP BY comment_approved"); 
+test_stmt("/**/ /*   */ SELECT /* * */ f FROM /* *a */ t");
 //*/
 
 /************************************/

@@ -9,3 +9,5 @@ DESCRIBE table
 SELECT YEAR(post_date) AS `year`, MONTH(post_date) AS `month`, count(ID) as posts FROM wp_posts WHERE post_type = 'post' AND post_status = 'publish' GROUP BY YEAR(post_date), MONTH(post_date) ORDER BY post_date DESC -- should change orderby to match groupby
 SELECT p.ID, post_status, p.* FROM wp_posts p
 CREATE TABLE table(c varchar(50) NOT NULL default 'lowercase')
+INSERT IGNORE INTO `wp_options` ( `option_name`, `option_value`, `autoload` ) VALUES ('auto_updater.lock', '1495799924', 'no') /* LOCK */
+/**/ /*   */ SELECT /* * */ f FROM /* *a */ t
