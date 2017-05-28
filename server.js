@@ -11,7 +11,17 @@ var translator = require('./translator');
 //db.query("CREATE OR REPLACE FUNCTION year(TIMESTAMP WITHOUT TIME ZONE) RETURNS INTEGER AS 'SELECT EXTRACT(year FROM $1)::integer;' LANGUAGE SQL IMMUTABLE RETURNS NULL ON NULL INPUT", []);
 //db.query("CREATE OR REPLACE FUNCTION month(TIMESTAMP WITHOUT TIME ZONE) RETURNS INTEGER AS 'SELECT EXTRACT(month FROM $1)::integer;' LANGUAGE SQL IMMUTABLE RETURNS NULL ON NULL INPUT", []);
 
-function authenticate (params, cb) {
+function convert_date_to_zero(str)
+{
+	if (str == '0001-01-01 00:00:00') {
+console.log('got a zero date');
+		return '0000-00-00 00:00:00';
+	}
+	return str;
+}
+
+function authenticate (params, cb)
+{
 	// accept anything
 	cb(null);
 	return;
@@ -75,10 +85,12 @@ console.log(err);
 
 		// quit
 		if (commandCode == 1) {
-			console.log('closing connection');
+			//console.log('closing connection');
 			conn.close();
 			return;
 		}
+
+		// other commands
 		console.log('got a non query');
 		console.log(knownCommand);
 		console.log(commandCode);
@@ -104,8 +116,8 @@ console.log(err);
 				return conn.writeEof();
 		} catch (e) {
 			console.log();
-			console.log('query: ' + query);
 			console.log('got an error while parsing');
+			console.log('query: ' + query);
 			console.log(err);
 			return conn.writeOk();
 		}
@@ -145,14 +157,15 @@ console.log(err);
 						}
 //console.log('writing ' + result.fields.length + ' columns');
 						conn.writeColumns(result.fields.map(pg_to_my_field));
-						result.rows.forEach(r => conn.writeTextRow(r));
+						result.rows.forEach(r => conn.writeTextRow(r.map(convert_date_to_zero)));
 						conn.writeEof();
 					} else if (ast.expr == 'INSERT') {
 //console.log(result);
-						//TODO: test this
 						var affectedRows = result.rowCount;
 						db.query('SELECT LASTVAL()', []).then(lastval_result =>  {
-//console.log('lastval: ' + lastval_result.rows[0][0]);
+//console.log();
+//console.log('query: ' + query);
+//console.log(lastval_result);
 							if (lastval_result.rows.length > 0)
 								conn.writeOk({affectedRows:affectedRows, insertId:lastval_result.rows[0][0]});
 							else
@@ -171,26 +184,26 @@ console.log(err);
 				.catch(err => {
 					if (ast.expr == 'INSERT' && ast.ignore)
 						return;
-console.log();
-console.log('query: ' + query);
-console.log('sent: ' + sql);
-if (params.length > 0) console.log(params);
 
 					var missing_table = err.message.match(/^relation "(.*)" does not exist$/);
 					if (missing_table)
 						return conn.writeError({code:1146, message:"Table '" + db.name + "." + missing_table[1] + "' doesn't exist"});
 
+console.log();
 console.log('error: ' + err.message);
+console.log('query: ' + query);
+console.log('sent: ' + sql);
+if (params.length > 0) console.log(params);
 console.log(err);
 					// error code 1046 is no database selected, 1146 is table doesn't exist
 					return conn.writeError({ code: 0, message: err.message });
 				});
 		}).catch(err => {
 console.log();
+			console.log('got an error while translating');
 console.log('query: ' + query);
 console.log('sent: ' + sql);
 if (params.length > 0) console.log(params);
-			console.log('got an error while translating');
 			console.log(err);
 		});
 	});

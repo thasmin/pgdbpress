@@ -186,7 +186,7 @@ select_field_noalias =
   / s:special_field { return {ident:s} }
   / a:fn_name ws* "(" ws* f:select_field f2:select_field2* ws* ")" { return { fn:a, args:[f].concat(f2) } }
   / t:ident ".*" { return {table:t, ident:'*'} }
-  / f:field { return f }
+  / f:field_or_literal_or_nullable { return f }
 
 sql_calc_found_rows = "SQL_CALC_FOUND_ROWS"i ws+ { return true }
 distinct = "DISTINCT"i ws+ { return true }
@@ -196,7 +196,7 @@ fn_name = "MAX"i / "SUM"i / "AVERAGE"i / "COUNT"i /
 	"NULLIF"i
 special_field = "@@[a-zA-Z_]+" / "DATABASE()"i / "FOUND_ROWS()"i
 
-keyword = "LIMIT"i / "ORDER"i / "GROUP"i / "WHERE"i / "JOIN"i / "ON"i
+keyword = "LIMIT"i / "ORDER"i / "GROUP"i / "WHERE"i / "JOIN"i / "ON"i / "INNER"i / "LEFT"i / "RIGHT"i / "CROSS"i / "USING"i
 from_clause = ws+ "FROM"i ws+ t1:aliasable_table t2:aliasable_table2* { return [t1].concat(t2) }
 aliasable_table =
 	t:field ws+ "AS" ws+ !keyword a:ident { t.alias = a; return t; }
@@ -205,8 +205,9 @@ aliasable_table =
 aliasable_table2 = ws* "," ws* t:aliasable_table { return t }
 
 join_type = j:("LEFT"i / "RIGHT"i / "OUTER"i / "INNER"i) ws+ { return j }
-join_clause = ws+ h:join_type? "JOIN"i ws+ t:aliasable_table ws "ON"i ws e:where_expression
-	{ return {type:h, table:t, expr:e} }
+join_clause =
+	ws+ h:join_type? "JOIN"i ws+ t:aliasable_table ws+ "ON"i ws+ e:where_expression { return {type:h, table:t, expr:e} }
+  / ws+ h:join_type? "JOIN"i ws+ t:aliasable_table ws+ "USING"i ws+ "(" ws* f:field_list ws* ")" { return {type:h, table:t, using:f} }
 
 where_clause = ws+ "WHERE"i ws+ w1:where_expression w2:where_expression2* { return [w1].concat(w2) }
 where_expression =
@@ -216,7 +217,7 @@ where_expression2 = ws+ c:("AND"i / "OR"i) ws+ e:where_expression { return { com
 operator_binary = "=" / "<>" / "!=" / "<" / ">" / "REGEXP"i / "LIKE"i / "NOT LIKE"i
 operator_list = "IN"i / "NOT IN"i
 operator_and_value = o:operator_binary ws* v:field_or_literal_or_nullable { return { oper:o, value:v } } /
-					 o:operator_list ws* "(" ws* n:list ")" { return { oper:o, value:n } }
+					 o:operator_list ws* "(" ws* n:list ws* ")" { return { oper:o, value:n } }
 
 group_by_clause = ws+ "GROUP BY"i ws+ f:fn_field_list { return f }
 

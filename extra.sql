@@ -11,3 +11,8 @@ SELECT p.ID, post_status, p.* FROM wp_posts p
 CREATE TABLE table(c varchar(50) NOT NULL default 'lowercase')
 INSERT IGNORE INTO `wp_options` ( `option_name`, `option_value`, `autoload` ) VALUES ('auto_updater.lock', '1495799924', 'no') /* LOCK */
 /**/ /*   */ SELECT /* * */ f FROM /* *a */ t
+SELECT COUNT( 1 ) FROM wp_posts WHERE post_type = 'post' AND post_status NOT IN ( 'trash','auto-draft','inherit' ) AND post_author = 1
+SELECT comment_post_ID, COUNT(comment_ID) as num_comments FROM wp_comments WHERE comment_post_ID IN ( '1' ) AND comment_approved = '0' GROUP BY comment_post_ID
+SELECT DISTINCT YEAR( post_date ) AS year, MONTH( post_date ) AS month FROM wp_posts WHERE post_type = 'post' AND post_status != 'auto-draft' AND post_status != 'trash' ORDER BY post_date DESC
+SELECT wp_users.ID,wp_users.user_login,wp_users.display_name FROM wp_users INNER JOIN wp_usermeta ON ( wp_users.ID = wp_usermeta.user_id ) WHERE 1=1 AND ( ( wp_usermeta.meta_key = 'wp_user_level' AND wp_usermeta.meta_value != '0' )) ORDER BY display_name ASC
+SELECT wp_term_taxonomy.term_id FROM wp_term_taxonomy INNER JOIN wp_terms USING (term_id) WHERE taxonomy = 'category' AND wp_terms.slug IN ('uncategorized')

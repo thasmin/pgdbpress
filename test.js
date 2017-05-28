@@ -6,7 +6,7 @@ var translator = require('./translator');
 var db         = require('./pool');
 
 //*
-test_stmt("/**/ /*   */ SELECT /* * */ f FROM /* *a */ t");
+test_stmt("SELECT wp_term_taxonomy.term_id FROM wp_term_taxonomy INNER JOIN wp_terms USING (term_id) WHERE taxonomy = 'category' AND wp_terms.slug IN ('uncategorized')");
 //*/
 
 /************************************/

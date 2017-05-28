@@ -5,9 +5,16 @@ var parser  = PEG.generate(fs.readFileSync("sql.pegjs", "utf8"));
 
 var db = null;
 
+var default_timestamp_00s = [];
+
 exports.init = function(init_db)
 {
 	db = init_db;
+
+	// find out which fields need to be converted from 0001-01-01 to 0000-00-00
+	// TODO: cache and igure out when to invalidate
+	var sql = "SELECT c.relname, f.attname FROM pg_attribute f JOIN pg_class c ON c.oid = f.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = f.attnum LEFT JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'r'::char AND f.attnum > 0 AND n.nspname = 'public' AND f.atthasdef = 't' AND pg_get_expr(d.adbin, d.adrelid) = '''0001-01-01 00:00:00''::timestamp without time zone'";
+	db.query(sql, []).then(result => { default_timestamp_00s = result.rows; });
 }
 
 exports.parse_stmt = function(stmt)
@@ -230,8 +237,9 @@ function create_to_pgsql(ast)
 		if (!field.can_be_null)
 			f.push('NOT NULL');
 		if (field.default) {
-			if (field.default != "'0000-00-00 00:00:00'")
-				f.push('DEFAULT ' + field.default);
+			if (field.default == "'0000-00-00 00:00:00'")
+				field.default = "'0001-01-01 00:00:00'";
+			f.push('DEFAULT ' + field.default);
 		}
 		fields_str.push(f.join(' '));
 	});
@@ -277,6 +285,7 @@ function insert_to_pgsql(ast)
 	var placeholders = ast.values.map(v => '(' + v.map(p => '$' + param_num++).join(', ') + ')').join(', ');
 	var flat_values = ast.values.reduce((a,b) => a.concat(b), []);
 	flat_values = flat_values.map(unquoteize);
+	flat_values = flat_values.map(fix_zero_date);
 
 	var parts = ['INSERT INTO', field_str(ast.table)];
 	parts.push('(' + ast.fields.map(field_str).join(', ') + ')');
@@ -313,6 +322,13 @@ function unquoteize(str)
 	return str;
 }
 
+function fix_zero_date(str)
+{
+	if (str == '0000-00-00 00:00:00')
+		return '0001-01-01 00:00:00';
+	return str;
+}
+
 function update_to_pgsql(ast)
 {
 	var parts = ['UPDATE', field_str(ast.table), 'SET'];
@@ -320,6 +336,7 @@ function update_to_pgsql(ast)
 	var param_count = 1;
 	var params = ast.changes.map(f => field_str(f.value));
 	params = params.map(unquoteize);
+	params = params.map(fix_zero_date);
 
 	var changes = [];
 	ast.changes.forEach(f => {
@@ -366,6 +383,28 @@ function where_clause(w) {
 	return arr;
 }
 
+function table_name(obj)
+{
+	if (obj.table)
+		return obj.table;
+	if (obj.ident)
+		return obj.ident;
+	return obj;
+}
+
+function using_clause(table1, table2, using)
+{
+	var t1 = table_name(table1);
+	var t2 = table_name(table2);
+	var parts = using.map(u => {
+		var using_field = unquoteize(field_str(u));
+		return field_str({table: table_name(table1), ident:using_field}) +
+			" = " +
+			field_str({table: table_name(table2), ident:using_field});
+	});
+	return parts.join(' AND ');
+}
+
 function select_to_pgsql(ast)
 {
 	var parts = ['SELECT'];
@@ -374,7 +413,8 @@ function select_to_pgsql(ast)
 
 	if (ast.calc_found_rows)
 		ast.fields.push('COUNT(*) OVER() AS _translator_full_count');
-	parts.push(ast.fields.map(field_str).join(', '));
+	var fields_str = ast.fields.map(field_str).join(', ');
+	parts.push(fields_str);
 
 	if (ast.from) {
 		parts.push('FROM');
@@ -386,7 +426,10 @@ function select_to_pgsql(ast)
 		parts.push('JOIN');
 		parts = parts.concat(field_str(j.table));
 		parts.push('ON');
-		parts = parts.concat(where_clause(j.expr));
+		if (j.expr)
+			parts = parts.concat(where_clause(j.expr));
+		else
+			parts = parts.concat(using_clause(ast.fields[0], j.table, j.using));
 	});
 
 	if (ast.where) {
@@ -404,6 +447,8 @@ function select_to_pgsql(ast)
 		// special case: grouping posts by year/month
 		if (ast.groupby && ast.groupby.map(field_str).join(', ') == 'EXTRACT(YEAR FROM "post_date"), EXTRACT(MONTH FROM "post_date")' && orderby == '"post_date" DESC')
 			orderby = ast.groupby.map(field_str).join(', ');
+		if (fields_str == 'EXTRACT(YEAR FROM "post_date") AS "year", EXTRACT(MONTH FROM "post_date") AS "month"' && orderby == '"post_date" DESC')
+			orderby = 'EXTRACT(YEAR FROM "post_date") DESC, EXTRACT(MONTH FROM "post_date") DESC';
 
 		parts.push('ORDER BY');
 		parts.push(orderby);
