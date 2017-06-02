@@ -1,0 +1,2 @@
+SELECT DISTINCT YEAR( post_date ) AS year, MONTH( post_date ) AS month FROM wp_posts WHERE post_type = 'post' AND post_status != 'auto-draft' AND post_status != 'trash' ORDER BY post_date DESC
+SELECT DISTINCT EXTRACT(YEAR FROM "post_date") AS "year", EXTRACT(MONTH FROM "post_date") AS "month" FROM "wp_posts" WHERE "post_type" = 'post' AND "post_status" != 'auto-draft' AND "post_status" != 'trash' ORDER BY EXTRACT(YEAR FROM "post_date") DESC, EXTRACT(MONTH FROM "post_date") DESC;

@@ -1,0 +1,2 @@
+/**/ /*   */ SELECT /* * */ f FROM /* *a */ t
+SELECT "f" FROM "t";

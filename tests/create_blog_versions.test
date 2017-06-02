@@ -1,0 +1,2 @@
+CREATE TABLE wp_blog_versions ( blog_id bigint(20) NOT NULL default '0', db_version varchar(20) NOT NULL default '', last_updated datetime NOT NULL default '0000-00-00 00:00:00', PRIMARY KEY  (blog_id), KEY db_version (db_version)) DEFAULT CHARACTER SET latin1 COLLATE latin1_swedish_ci;
+CREATE TABLE wp_blog_versions ( "blog_id" BIGINT NOT NULL DEFAULT '0', "db_version" VARCHAR(20) NOT NULL DEFAULT '', "last_updated" TIMESTAMP NOT NULL DEFAULT '0001-01-01 00:00:00' , PRIMARY KEY ("blog_id") ); CREATE INDEX wp_blog_versions_db_version ON wp_blog_versions ( "db_version" );

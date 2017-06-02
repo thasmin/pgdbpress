@@ -1,0 +1,2 @@
+SELECT wp_comments.* FROM wp_comments WHERE comment_ID IN (1)
+SELECT wp_comments.* FROM "wp_comments" WHERE "comment_ID" IN (1);

@@ -1,0 +1,2 @@
+SELECT * FROM wp_posts  WHERE (post_type = 'page' AND post_status = 'publish')     ORDER BY menu_order,wp_posts.post_title ASC
+SELECT * FROM "wp_posts" WHERE  ( "post_type" = 'page' AND "post_status" = 'publish' ) ORDER BY "menu_order", wp_posts."post_title" ASC;

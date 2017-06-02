@@ -1,0 +1,2 @@
+SELECT p.ID, post_status, p.* FROM wp_posts p
+SELECT p."ID", "post_status", p.* FROM "wp_posts" AS p;

@@ -1,0 +1,2 @@
+CREATE TABLE table(c varchar(50) NOT NULL default 'lowercase')
+CREATE TABLE table ( "c" VARCHAR(50) NOT NULL DEFAULT 'lowercase' );

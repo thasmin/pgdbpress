@@ -1,0 +1,2 @@
+SELECT wp_posts.* FROM wp_posts WHERE ID IN (1)
+SELECT wp_posts.* FROM "wp_posts" WHERE "ID" IN (1);

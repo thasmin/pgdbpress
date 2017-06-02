@@ -1,0 +1,2 @@
+SELECT * FROM wp_users WHERE user_login = 'dan'
+SELECT * FROM "wp_users" WHERE "user_login" = 'dan';

@@ -1,0 +1,2 @@
+CREATE TABLE wp_options ( option_id bigint(20) unsigned NOT NULL auto_increment, option_name varchar(191) NOT NULL default '', option_value longtext NOT NULL, autoload varchar(20) NOT NULL default 'yes', PRIMARY KEY  (option_id), UNIQUE KEY option_name (option_name)) DEFAULT CHARACTER SET latin1 COLLATE latin1_swedish_ci;
+CREATE TABLE wp_options ( "option_id" SERIAL NOT NULL, "option_name" VARCHAR(191) NOT NULL DEFAULT '', "option_value" TEXT NOT NULL, "autoload" VARCHAR(20) NOT NULL DEFAULT 'yes' , PRIMARY KEY ("option_id"),UNIQUE ("option_name") );

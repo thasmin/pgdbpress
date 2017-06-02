@@ -1,0 +1,1 @@
+INSERT IGNORE INTO `wp_options` ( `option_name`, `option_value`, `autoload` ) VALUES ('auto_updater.lock', '1495799924', 'no') /* LOCK */

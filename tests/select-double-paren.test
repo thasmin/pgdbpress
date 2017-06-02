@@ -1,0 +1,2 @@
+SELECT wp_users.ID,wp_users.user_login,wp_users.display_name FROM wp_users INNER JOIN wp_usermeta ON ( wp_users.ID = wp_usermeta.user_id ) WHERE 1=1 AND ( ( wp_usermeta.meta_key = 'wp_user_level' AND wp_usermeta.meta_value != '0' )) ORDER BY display_name ASC
+SELECT wp_users."ID", wp_users."user_login", wp_users."display_name" FROM "wp_users" INNER JOIN "wp_usermeta" ON wp_users."ID" = wp_usermeta."user_id" WHERE 1 = 1 AND  ( wp_usermeta."meta_key" = 'wp_user_level' AND wp_usermeta."meta_value" != '0' ) ORDER BY "display_name" ASC;

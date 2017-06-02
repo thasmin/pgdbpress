@@ -1,0 +1,2 @@
+SELECT * FROM wp_options WHERE option_name REGEXP '^rss_[0-9a-f]{32}(_ts)?$'
+SELECT * FROM "wp_options" WHERE "option_name" SIMILAR TO '^rss_[0-9a-f]{32}(_ts)?$';

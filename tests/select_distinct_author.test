@@ -1,0 +1,2 @@
+SELECT DISTINCT post_author FROM wp_posts WHERE post_type = 'post' AND post_status = 'publish' LIMIT 2
+SELECT DISTINCT "post_author" FROM "wp_posts" WHERE "post_type" = 'post' AND "post_status" = 'publish' LIMIT 2;

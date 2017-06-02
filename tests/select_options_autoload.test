@@ -1,0 +1,2 @@
+SELECT option_name, option_value FROM wp_options WHERE autoload = 'yes'
+SELECT "option_name", "option_value" FROM "wp_options" WHERE "autoload" = 'yes';

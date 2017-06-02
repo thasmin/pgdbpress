@@ -229,8 +229,9 @@ limit_clause =
 
 
 
-ws = (ws_chars / multiline_comment)+
+ws = (ws_chars / singleline_comment / multiline_comment)+
 ws_chars = [ \t\n\r]+
+singleline_comment = "--" .*
 multiline_comment = "/*" ([^*]*)? multiline_comment2*
 multiline_comment2 = "*/" / "*" [^*]+
 

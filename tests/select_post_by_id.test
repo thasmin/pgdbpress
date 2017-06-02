@@ -1,0 +1,2 @@
+SELECT * FROM wp_posts WHERE ID = 5 LIMIT 1
+SELECT * FROM "wp_posts" WHERE "ID" = 5 LIMIT 1;

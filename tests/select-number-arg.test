@@ -1,0 +1,2 @@
+SELECT COUNT( 1 ) FROM wp_posts WHERE post_type = 'post' AND post_status NOT IN ( 'trash','auto-draft','inherit' ) AND post_author = 1
+SELECT COUNT(1) FROM "wp_posts" WHERE "post_type" = 'post' AND "post_status" NOT IN ('trash','auto-draft','inherit') AND "post_author" = 1;

@@ -1,0 +1,2 @@
+SELECT session_value FROM wp_woocommerce_sessions WHERE session_key = '1'
+SELECT "session_value" FROM "wp_woocommerce_sessions" WHERE "session_key" = '1';
