@@ -51,16 +51,6 @@ function db_error(query, reason)
 	});
 }
 
-function exception(query, reason, err)
-{
-	return Promise.resolve({
-		result: 'exception',
-		query: query,
-		reason: reason,
-		error: err
-	});
-}
-
 function to_column(field)
 {
 	return {
@@ -349,7 +339,7 @@ function delete_to_pgsql(ast)
 		get_primary_key_fields(tables).then(v => {
 			var aliases = ast.tables.filter(t => ast.aliases.map(a => a.alias).includes(t));
 			var fetch_promises = aliases.map(t => {
-				var table_name = ast.aliases.filter(a => a.alias).map(a => a.ident)[0];
+				var table_name = ast.aliases.filter(a => a.alias == t).map(a => a.ident)[0];
 				var key_fields = primary_key_fields[table_name];
 				key_fields = key_fields.map(f => t + '.' + f).join(', ');
 				// run query to get primary of rows to be deleted

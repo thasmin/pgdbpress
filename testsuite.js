@@ -4,7 +4,6 @@ var fs         = require('fs')
 var translator = require('./translator');
 var db         = require('./pool');
 
-/*
 var tests = fs.readdirSync('tests').filter(f => f.endsWith('.test')).map(f => 'tests/' + f);
 tests.forEach(file => {
 	var test_sql = fs.readFileSync(file, 'utf8').split('\n');
@@ -20,7 +19,6 @@ tests.forEach(file => {
 		console.log('invalid test');
 	}
 });
-*/
 
 var config_file = process.argv[2] || './test_config.json';
 if (!fs.existsSync(config_file))
@@ -34,11 +32,12 @@ db_tests.forEach(file => {
 	var test = fs.readFileSync(file, 'utf8').split('\n');
 	test = test.filter(l => l.length > 0 && l.substring(0,2) != '--');
 
-	console.log(file);
+	//console.log(file);
 	if (test.length == 1) {
-		console.log(test);
+		//console.log(test);
 		return;
 	}
+	console.log(file);
 
 	var sections = {
 		setup: [],
@@ -57,43 +56,71 @@ db_tests.forEach(file => {
 		sections[cur_section].push(l);
 	});
 
-	console.log(sections);
+	//console.log(sections);
 
-	function db_query_no_params(sql) { return db.query(sql, []); }
+	function db_query(sql) {
+		//console.log('running ' + sql);
+		return db.query(sql, []);
+	 }
 
-	// execute setup
-	var setups = sections.setup.map(db_query_no_params));
-	var chain = setups[0]();
-	for (var i = 1; i < setups.length; ++i)
-		chain.then(setups[i]);
+	function run_section(sqls) {
+		//console.log('running a section');
+		return sqls.reduce(
+			(acc, sql) => acc.then(() => db_query(sql)),
+			Promise.resolve()
+		);
+	}
 
-	// run translated statements
-	var runs = sections.setup.map(sql => {
-		try {
-			var ast = translator.parse_stmt(query);
-			if (ast == null)
-				throw new Error("unable to create AST");
-		} catch (e) {
-			console.log();
-			console.log('got an error while parsing');
-			console.log('query: ' + query);
-			console.log(err);
-			return conn.writeOk();
-		}
-		db.query(sql, [])
-	});
-	var chain = runs[0]();
-	for (var i = 1; i < runs.length; ++i)
-		chain.then(runs[i]);
+	function db_translate(sql) {
+		//console.log('translating ' + sql);
+		return translator.translate(sql);
+	 }
 
-	// confirm tests
+	function translate_section(sqls) {
+		//console.log('translating a section');
+		return sqls.reduce(
+			(acc, sql) => acc.then(() => db_translate(sql)),
+			Promise.resolve()
+		);
+	}
 
-	// execute teardown
-	var teardown = sections.setup.map(db_query_no_params));
-	var chain = teardown[0]();
-	for (var i = 1; i < teardown.length; ++i)
-		chain.then(teardown[i]);
+	function array_equals(a1, a2) {
+		return a1.length == a2.length && a1.every((el, i) => el == a2[i]);
+	}
 
+	function match_sql(sql, match) {
+		return new Promise((resolve, reject) => {
+			//console.log('matching sql: ' + sql);
+			db.query(sql, []).then(result => {
+				if (!result.rows)
+					reject('tests need to return rowsets');
+				if (result.rows.length != match.length)
+					reject('incorrect number of rows');
+				for (var i = 0; i < result.rows.length; ++i)
+					if (!array_equals(result.rows[i], match))
+						reject('row ' + i + ' is different');
+				resolve();
+			});
+		});
+	}
+
+	function test_section(sqls_matches) {
+		//console.log('matching a section');
+		var sqls = sqls_matches.filter((el, i) => i % 2 == 0);
+		var matches = sqls_matches.filter((el, i) => i % 2 == 1);
+		matches = matches.map(JSON.parse);
+		var promises = sqls.map((sql, i) => match_sql(sql, matches[i]));
+		return Promise.all(promises);
+	}
+
+	run_section(sections.setup)
+		.then(() => translate_section(sections.run))
+		.then(() => test_section(sections.test))
+		.then(() => run_section(sections.teardown))
+		.catch(e => {
+			console.log('error: ' + e);
+			run_section(sections.teardown);
+		});
 });
 
 function show(file, sql, result, params)

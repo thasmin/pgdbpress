@@ -1,6 +1,8 @@
 .setup
-CREATE TEMPORARY TABLE tab1(col1 integer);
-CREATE TEMPORARY TABLE tab2(col2 integer);
+DROP TABLE IF EXISTS tab1;
+DROP TABLE IF EXISTS tab2;
+CREATE TABLE tab1(col1 integer PRIMARY KEY);
+CREATE TABLE tab2(col2 integer PRIMARY KEY);
 INSERT INTO tab1(col1) VALUES(1), (2);
 INSERT INTO tab2(col2) VALUES(2), (3);
 
@@ -8,9 +10,9 @@ INSERT INTO tab2(col2) VALUES(2), (3);
 DELETE t1, t2 FROM tab1 t1, tab2 t2 WHERE t1.col1 = t2.col2;
 
 .test
-SELECT * FROM t1;
+SELECT * FROM tab1;
 [1]
-SELECT * FROM t2;
+SELECT * FROM tab2;
 [3]
 
 .teardown
