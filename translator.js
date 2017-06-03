@@ -7,6 +7,167 @@ var db = null;
 
 var default_timestamp_00s = [];
 
+function ok(affectedRows = null, insertId = null)
+{
+	return Promise.resolve({
+		result: 'ok',
+		affectedRows: affectedRows,
+		insertId: insertId
+	});
+}
+
+function rowset(result)
+{
+	return {
+		result: 'rowset',
+		columns: result.fields.map(to_column),
+		rows: result.rows.map(to_row)
+	};
+}
+
+function rowset_data(columns, data)
+{
+	return {
+		result: 'rowset',
+		columns: columns,
+		data: data
+	};
+}
+
+function table_not_found(table)
+{
+	return Promise.resolve({
+		result: 'table_not_found',
+		table: table
+	});
+}
+
+function db_error(query, reason)
+{
+	return Promise.resolve({
+		result: 'error',
+		query: query,
+		reason: reason
+	});
+}
+
+function exception(query, reason, err)
+{
+	return Promise.resolve({
+		result: 'exception',
+		query: query,
+		reason: reason,
+		error: err
+	});
+}
+
+function to_column(field)
+{
+	return {
+		table: field.tableID,
+		name: field.name,
+		dataType: field.dataTypeID,
+	};
+}
+
+function convert_date_to_zero(str)
+{
+	if (str == '0001-01-01 00:00:00') {
+console.log('got a zero date');
+		return '0000-00-00 00:00:00';
+	}
+	return str;
+}
+
+function to_row(r)
+{
+	return r.map(convert_date_to_zero);
+}
+
+exports.translate = function(query)
+{
+	var query_lower = query.toLowerCase();
+	if (query_lower == 'select @@version_comment limit 1')
+		return Promise.resolve(rowset_data(['@@version_comment'], [['Ubuntu 17.04']]));
+	if (query_lower == 'select database()')
+		return Promise.resolve(rowset_data(['database'], [[db.name]]));
+	if (query_lower == 'select @@session.sql_mode')
+		return Promise.resolve(rowset_data(['@@session.sql_mode'], [['NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION']]));
+
+	var ast = null;
+	try {
+		ast = exports.parse_stmt(query);
+	} catch (e) {
+		return Promise.reject(new Error('got an error while parsing: ' + query, e));
+	}
+
+	if (ast == null)
+		return Promise.resolve(eof());
+	if (ast.expr == 'SET')
+		return Promise.resolve(ok());
+
+	// there's one query that's locally cached
+	if (ast.expr == 'SELECT' && ast.fields.length == 1 && ast.fields[0].ident == 'FOUND_ROWS()') {
+//console.log('sending back calced rows: ' + last_calc_found_rows);
+		return Promise.resolve(rowset_data([ ast.fields[0].ident ], [[ last_calc_found_rows ]]));
+	}
+
+	return new Promise((resolve, reject) => {
+		exports.ast_to_pgsql(ast).then(r => {
+			var sql = r[0];
+			var params = r[1];
+
+			db.query(sql, params)
+				.then(result => {
+//console.log();
+//console.log('query: ' + query);
+//console.log('sent: ' + sql);
+//if (params.length > 0) console.log(params);
+					if (['SELECT', 'SHOW', 'EXPLAIN'].includes(ast.expr)) {
+//console.log(result.rows);
+						if (result.rows.length > 0 && result.rows[0]['_translator_full_count']) {
+							last_calc_found_rows = result.rows[0]['_translator_full_count'];
+//console.log('calced rows:' + last_calc_found_rows);
+						}
+//console.log('writing ' + result.fields.length + ' columns');
+						return resolve(rowset(result));
+					} else if (ast.expr == 'INSERT') {
+//console.log(result);
+						var affectedRows = result.rowCount;
+						db.query('SELECT LASTVAL()', []).then(lastval_result =>  {
+//console.log();
+//console.log('query: ' + query);
+//console.log(lastval_result);
+							if (lastval_result.rows.length > 0)
+								return resolve(ok(affectedRows, lastval_result.rows[0][0]));
+							else
+								return resolve(ok(affectedRows));
+						}).catch(e => {
+//console.log('no lastval available');
+							return resolve(ok(affectedRows));
+						});
+					} else if (ast.expr == 'UPDATE' || ast.expr == 'DELETE') {
+//console.log(result);
+						return resolve(ok(result.rowCount));
+					} else if (ast.expr == 'CREATE') {
+						return resolve(ok());
+					}
+				})
+				.catch(err => {
+					if (ast.expr == 'INSERT' && ast.ignore)
+						return resolve(ok());
+
+					var missing_table = err.message.match(/^relation "(.*)" does not exist$/);
+					if (missing_table)
+						return resolve(table_not_found(db.name + "." + missing_table[1]));
+					return resolve(db_error(query, err.message));
+				});
+		}).catch(err => {
+			reject(new Error('got an error while translating: ' + query, err));
+		});
+	});
+}
+
 exports.init = function(init_db)
 {
 	db = init_db;
@@ -74,7 +235,7 @@ function show_to_pgsql(ast)
 		else if (ast.cond.oper == 'LIKE')
 			return ["SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE " + ast.cond.value + " ORDER BY table_name", []];
 		else if (ast.cond.oper == 'WHERE')
-			return ["SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name AND " + translator.where_expr(ast.cond.expr) + " ORDER BY table_name", []];
+			return ["SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name AND " + where_expr(ast.cond.expr) + " ORDER BY table_name", []];
 	}
 }
 
@@ -361,7 +522,6 @@ function where_expr(w)
 		w.oper = 'SIMILAR TO';
 	return [ field_str(w.field), w.oper, w.value ];
 }
-exports.where_expr = where_expr;
 
 function where_clause(w) {
 	var arr = [];
