@@ -28,100 +28,121 @@ db.open(config, config.test_database);
 translator.init(db);
 
 var db_tests = fs.readdirSync('tests').filter(f => f.endsWith('.dbtest')).map(f => 'tests/' + f);
-db_tests.forEach(file => {
-	var test = fs.readFileSync(file, 'utf8').split('\n');
-	test = test.filter(l => l.length > 0 && l.substring(0,2) != '--');
-
-	//console.log(file);
-	if (test.length == 1) {
-		//console.log(test);
+var start = null;
+db_tests.forEach((file, i) => {
+	if (!start) {
+		start = run_db_test(file).catch(console.log);
 		return;
 	}
-	console.log(file);
 
-	var sections = {
-		setup: [],
-		run: [],
-		test: [],
-		teardown: [],
-	};
-	var cur_section = null;
-	test.forEach(l => {
-		if (l[0] == '.') {
-			cur_section = l.substring(1);
-			return;
-		}
-		if (cur_section == null)
-			return;
-		sections[cur_section].push(l);
-	});
-
-	//console.log(sections);
-
-	function db_query(sql) {
-		//console.log('running ' + sql);
-		return db.query(sql, []);
-	 }
-
-	function run_section(sqls) {
-		//console.log('running a section');
-		return sqls.reduce(
-			(acc, sql) => acc.then(() => db_query(sql)),
-			Promise.resolve()
-		);
-	}
-
-	function db_translate(sql) {
-		//console.log('translating ' + sql);
-		return translator.translate(sql);
-	 }
-
-	function translate_section(sqls) {
-		//console.log('translating a section');
-		return sqls.reduce(
-			(acc, sql) => acc.then(() => db_translate(sql)),
-			Promise.resolve()
-		);
-	}
-
-	function array_equals(a1, a2) {
-		return a1.length == a2.length && a1.every((el, i) => el == a2[i]);
-	}
-
-	function match_sql(sql, match) {
-		return new Promise((resolve, reject) => {
-			//console.log('matching sql: ' + sql);
-			db.query(sql, []).then(result => {
-				if (!result.rows)
-					reject('tests need to return rowsets');
-				if (result.rows.length != match.length)
-					reject('incorrect number of rows');
-				for (var i = 0; i < result.rows.length; ++i)
-					if (!array_equals(result.rows[i], match))
-						reject('row ' + i + ' is different');
-				resolve();
-			});
-		});
-	}
-
-	function test_section(sqls_matches) {
-		//console.log('matching a section');
-		var sqls = sqls_matches.filter((el, i) => i % 2 == 0);
-		var matches = sqls_matches.filter((el, i) => i % 2 == 1);
-		matches = matches.map(JSON.parse);
-		var promises = sqls.map((sql, i) => match_sql(sql, matches[i]));
-		return Promise.all(promises);
-	}
-
-	run_section(sections.setup)
-		.then(() => translate_section(sections.run))
-		.then(() => test_section(sections.test))
-		.then(() => run_section(sections.teardown))
-		.catch(e => {
-			console.log('error: ' + e);
-			run_section(sections.teardown);
-		});
+	//console.log(file);
+	start = start
+		.then(() => { return run_db_test(file); })
+		.catch(console.log);
 });
+// handle last rejection
+start.then(() => { process.exit(0); });
+
+function run_db_test(file)
+{
+	//console.log('running ' + file);
+	return new Promise((resolve, reject) => {
+		var test = fs.readFileSync(file, 'utf8').split('\n');
+		test = test.filter(l => l.length > 0 && l.substring(0,2) != '--');
+
+		if (test.length == 1)
+			return reject(file + ': incomplete db test');
+
+		var sections = {
+			setup: [],
+			run: [],
+			test: [],
+			teardown: [],
+		};
+		var cur_section = null;
+		test.forEach(l => {
+			if (l[0] == '.') {
+				cur_section = l.substring(1);
+				return;
+			}
+			if (cur_section == null)
+				return;
+			sections[cur_section].push(l);
+		});
+
+		run_section(sections.setup)
+			.then(() => translate_section(sections.run))
+			.then(() => test_section(sections.test))
+			.then(() => run_section(sections.teardown))
+			.then(resolve)
+			.catch(e => {
+				run_section(sections.teardown);
+				reject(file + ': ' + e);
+			});
+	});
+}
+
+function db_query(sql)
+{
+	//console.log('running ' + sql);
+	return db.query(sql, []);
+ }
+
+function run_section(sqls)
+{
+	//console.log('running a section');
+	return sqls.reduce(
+		(acc, sql) => acc.then(() => db_query(sql)),
+		Promise.resolve()
+	);
+}
+
+function db_translate(sql)
+{
+	//console.log('translating ' + sql);
+	return translator.translate(sql);
+ }
+
+function translate_section(sqls)
+{
+	//console.log('translating a section');
+	return sqls.reduce(
+		(acc, sql) => acc.then(() => db_translate(sql)),
+		Promise.resolve()
+	);
+}
+
+function array_equals(a1, a2)
+{
+	return a1.length == a2.length && a1.every((el, i) => el == a2[i]);
+}
+
+function match_sql(sql, match) {
+	return new Promise((resolve, reject) => {
+		//console.log('matching sql: ' + sql);
+		translator.translate(sql, []).then(result => {
+			//console.log(result);
+			if (result.result != 'rowset')
+				reject('tests need to return rowsets');
+			if (result.rows.length != match.length)
+				reject('incorrect number of rows');
+			for (var i = 0; i < result.rows.length; ++i)
+				if (!array_equals(result.rows[i], match))
+					reject('row ' + i + ' is different');
+			resolve();
+		}).catch(reject);
+	});
+}
+
+function test_section(sqls_matches) {
+	//console.log('matching a section');
+	var sqls = sqls_matches.filter((el, i) => i % 2 == 0);
+	var matches = sqls_matches.filter((el, i) => i % 2 == 1);
+	matches = matches.map(JSON.parse);
+	var promises = sqls.map((sql, i) => match_sql(sql, matches[i]));
+	return Promise.all(promises);
+}
+
 
 function show(file, sql, result, params)
 {

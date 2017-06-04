@@ -30,7 +30,7 @@ function rowset_data(columns, data)
 	return {
 		result: 'rowset',
 		columns: columns,
-		data: data
+		rows: data
 	};
 }
 
@@ -115,8 +115,9 @@ exports.translate = function(query)
 //if (params.length > 0) console.log(params);
 					if (['SELECT', 'SHOW', 'EXPLAIN'].includes(ast.expr)) {
 //console.log(result.rows);
-						if (result.rows.length > 0 && result.rows[0]['_translator_full_count']) {
-							last_calc_found_rows = result.rows[0]['_translator_full_count'];
+						var full_count_index = result.fields.findIndex(f => f.name == '_translator_full_count')
+						if (result.rows.length > 0 && full_count_index) {
+							last_calc_found_rows = result.rows[0][full_count_index];
 //console.log('calced rows:' + last_calc_found_rows);
 						}
 //console.log('writing ' + result.fields.length + ' columns');

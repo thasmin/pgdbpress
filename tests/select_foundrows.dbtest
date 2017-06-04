@@ -1,1 +1,14 @@
+.setup
+DROP TABLE IF EXISTS tab1;
+CREATE TABLE tab1(col1 integer PRIMARY KEY);
+INSERT INTO tab1(col1) VALUES(1), (2), (3), (4), (5);
+
+.run
+SELECT SQL_CALC_FOUND_ROWS * FROM tab1 LIMIT 2;
+
+.test
 SELECT FOUND_ROWS()
+[5]
+
+.teardown
+DROP TABLE tab1;
