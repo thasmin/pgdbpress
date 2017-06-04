@@ -28,20 +28,19 @@ db.open(config, config.test_database);
 translator.init(db);
 
 var db_tests = fs.readdirSync('tests').filter(f => f.endsWith('.dbtest')).map(f => 'tests/' + f);
-var start = null;
-db_tests.forEach((file, i) => {
-	if (!start) {
-		start = run_db_test(file).catch(console.log);
-		return;
-	}
+var db_promise = db_tests.reduce(
+	(promise, file) => promise.then(() => { return run_db_test(file); }).catch(e => show_db_error(file, e)),
+	Promise.resolve()
+);
+db_promise.then(() => process.exit(0));
 
-	//console.log(file);
-	start = start
-		.then(() => { return run_db_test(file); })
-		.catch(console.log);
-});
-// handle last rejection
-start.then(() => { process.exit(0); });
+function show_db_error(file, err)
+{
+	if (err.then)
+		err.then(e => console.log(file + ": " + e.reason));
+	else
+		console.log(file + ": " + err);
+}
 
 function run_db_test(file)
 {
@@ -51,7 +50,7 @@ function run_db_test(file)
 		test = test.filter(l => l.length > 0 && l.substring(0,2) != '--');
 
 		if (test.length == 1)
-			return reject(file + ': incomplete db test');
+			return reject('incomplete db test');
 
 		var sections = {
 			setup: [],
@@ -77,7 +76,7 @@ function run_db_test(file)
 			.then(resolve)
 			.catch(e => {
 				run_section(sections.teardown);
-				reject(file + ': ' + e);
+				reject(e);
 			});
 	});
 }

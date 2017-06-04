@@ -34,10 +34,11 @@ function rowset_data(columns, data)
 	};
 }
 
-function table_not_found(table)
+function table_not_found(query, table)
 {
 	return Promise.resolve({
 		result: 'table_not_found',
+		query: query,
 		table: table
 	});
 }
@@ -113,6 +114,7 @@ exports.translate = function(query)
 //console.log('query: ' + query);
 //console.log('sent: ' + sql);
 //if (params.length > 0) console.log(params);
+//console.log(result);
 					if (['SELECT', 'SHOW', 'EXPLAIN'].includes(ast.expr)) {
 //console.log(result.rows);
 						var full_count_index = result.fields.findIndex(f => f.name == '_translator_full_count')
@@ -150,8 +152,8 @@ exports.translate = function(query)
 
 					var missing_table = err.message.match(/^relation "(.*)" does not exist$/);
 					if (missing_table)
-						return resolve(table_not_found(db.name + "." + missing_table[1]));
-					return resolve(db_error(query, err.message));
+						return reject(table_not_found(query, db.name + "." + missing_table[1]));
+					return reject(db_error(query, err.message));
 				});
 		}).catch(err => {
 			reject(new Error('got an error while translating: ' + query, err));

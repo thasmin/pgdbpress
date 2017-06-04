@@ -1,1 +1,13 @@
-INSERT IGNORE INTO `wp_options` ( `option_name`, `option_value`, `autoload` ) VALUES ('auto_updater.lock', '1495799924', 'no') /* LOCK */
+.setup
+DROP TABLE IF EXISTS tab1;
+CREATE TABLE tab1(col1 integer PRIMARY KEY);
+CREATE UNIQUE INDEX tab1_unique ON tab1(col1);
+INSERT INTO tab1(col1) VALUES(1), (2), (3), (4), (5);
+
+.run
+INSERT IGNORE INTO tab1(col1) VALUES (1);
+
+.test
+
+.teardown
+DROP TABLE tab1;
