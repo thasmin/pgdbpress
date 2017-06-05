@@ -1,1 +1,15 @@
-INSERT INTO `wp_options` (`option_name`, `option_value`, `autoload`) VALUES ('_transient_is_multi_author', '0', 'yes') ON DUPLICATE KEY UPDATE `option_name` = VALUES(`option_name`), `option_value` = VALUES(`option_value`), `autoload` = VALUES(`autoload`)
+.setup
+DROP TABLE IF EXISTS tab1;
+CREATE TABLE tab1(id int primary key, val varchar(50));
+CREATE UNIQUE INDEX tab1_id ON tab1(id);
+INSERT INTO tab1(id, val) VALUES(1, 'orig');
+
+.run
+INSERT INTO tab1(id, val) VALUES(1, 'repl') ON DUPLICATE KEY UPDATE val = VALUES(val);
+
+.test
+SELECT val FROM tab1 WHERE id=1;
+["repl"]
+
+.teardown
+DROP TABLE tab1;

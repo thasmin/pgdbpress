@@ -36,15 +36,17 @@ db_promise.then(() => process.exit(0));
 
 function show_db_error(file, err)
 {
-	if (err.then)
-		err.then(e => console.log(file + ": " + e.reason));
-	else
-		console.log(file + ": " + err);
+	if (!err.then)
+		err = Promise.resolve(err);
+	err.then(e => {
+		if (e.reason)
+			e = e.reason;
+		console.log(file + ": " + e);
+	});
 }
 
 function run_db_test(file)
 {
-	//console.log('running ' + file);
 	return new Promise((resolve, reject) => {
 		var test = fs.readFileSync(file, 'utf8').split('\n');
 		test = test.filter(l => l.length > 0 && l.substring(0,2) != '--');
@@ -83,13 +85,11 @@ function run_db_test(file)
 
 function db_query(sql)
 {
-	//console.log('running ' + sql);
 	return db.query(sql, []);
  }
 
 function run_section(sqls)
 {
-	//console.log('running a section');
 	return sqls.reduce(
 		(acc, sql) => acc.then(() => db_query(sql)),
 		Promise.resolve()
@@ -98,13 +98,11 @@ function run_section(sqls)
 
 function db_translate(sql)
 {
-	//console.log('translating ' + sql);
 	return translator.translate(sql);
  }
 
 function translate_section(sqls)
 {
-	//console.log('translating a section');
 	return sqls.reduce(
 		(acc, sql) => acc.then(() => db_translate(sql)),
 		Promise.resolve()
@@ -134,14 +132,12 @@ function match_sql(sql, match) {
 }
 
 function test_section(sqls_matches) {
-	//console.log('matching a section');
 	var sqls = sqls_matches.filter((el, i) => i % 2 == 0);
 	var matches = sqls_matches.filter((el, i) => i % 2 == 1);
 	matches = matches.map(JSON.parse);
 	var promises = sqls.map((sql, i) => match_sql(sql, matches[i]));
 	return Promise.all(promises);
 }
-
 
 function show(file, sql, result, params)
 {

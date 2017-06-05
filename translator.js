@@ -313,14 +313,15 @@ function get_primary_key_fields(tables)
 	}));
 }
 
+var unique_key_fields = {};
 // only returns one unique key in the table
 function get_unique_key_field_name(table)
 {
 	//sql = "SELECT conname FROM pg_constraint WHERE conrelid = (SELECT oid FROM pg_class WHERE relname LIKE $1) AND contype = 'u'";
 	// probably not the best way to get it
 	sql = 'SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = $1::regclass AND NOT i.indisprimary'
-	return db.query(sql, [table])
-		.then(res => res.rows[0][0])
+	return db.query(sql, [unquoteize(table)])
+		.then(res => { unique_key_fields[table] = res.rows[0][0]; } )
 		.catch(err => {
 			console.log('error getting unique key field name');
 			console.log(err);
@@ -449,11 +450,12 @@ function insert_to_pgsql(ast)
 	// adding on conflict clause requires primary keys
 	if (ast.on_dupe_key) {
 		var table = field_str(ast.table);
-		return get_unique_key_field_name(table).then(key_name => {
+		return get_unique_key_field_name(table).then(() => {
+			var key_name = unique_key_fields[table];
 			parts.push('ON CONFLICT (' + key_name + ') DO UPDATE SET');
 			var odks = [];
 			ast.on_dupe_key.map(k => {
-				odks.push([ field_str(k.field), '=', 'excluded.' + unquoteize(field_str(k.value)) ].join(''));
+				odks.push([ unquoteize(field_str(k.field)), '=', 'excluded.' + unquoteize(field_str(k.value)) ].join(''));
 			});
 			parts.push( odks.join(', ') );
 			return Promise.resolve([parts.join(' ') + ';', flat_values]);
