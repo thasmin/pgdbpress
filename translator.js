@@ -29,7 +29,11 @@ function rowset_data(columns, data)
 {
 	return {
 		result: 'rowset',
-		columns: columns,
+		columns: columns.map(col => { return {
+			table: 1,
+			name: col,
+			dataType: 19
+		};}),
 		rows: data
 	};
 }

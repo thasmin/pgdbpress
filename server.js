@@ -67,6 +67,7 @@ server.on('connection', function (conn) {
 	conn.on('init_db', db_name => {
 		db.open(config, db_name);
 		translator.init(db);
+		conn.writeOk();
 	});
 
 	conn.on('query', query => {
