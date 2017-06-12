@@ -17,7 +17,7 @@ exports.open = function(config, db_name)
 
 function handleError(resolve, reject, sql, args, err)
 {
-//console.log(n + ' got a sql error: ' + err.message);
+//console.log('got a sql error: ' + err.message);
 	// attempt to fix comparison mismatch errors
 	if (err.message.indexOf('operator does not exist: ') === 0) {
 		// comparison type mismatch
@@ -32,6 +32,14 @@ function handleError(resolve, reject, sql, args, err)
 		var fixed = remainder.substr(0, spaceAt) + "::" + types[0] + remainder.substr(spaceAt);
 		sql = sql.substr(0, errorAt) + fixed;
 //console.log(sql);
+		exports.query(sql, args)
+			.then(resolve)
+			.catch(err => { handleError(resolve, reject, sql, args, err); });
+	} else if (err.message.indexOf('invalid input syntax for type timestamp: ') === 0) {
+		// date is in format Sat Jun 10 2017 03:35:44 GMT+0000 (UTC)
+		var old_date_str = err.message.split('"')[1];
+		var new_date_str = new Date(old_date_str).toISOString();
+		sql = sql.replace(old_date_str, new_date_str);
 		exports.query(sql, args)
 			.then(resolve)
 			.catch(err => { handleError(resolve, reject, sql, args, err); });
