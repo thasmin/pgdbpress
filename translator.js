@@ -47,11 +47,12 @@ function table_not_found(query, table)
 	});
 }
 
-function db_error(query, reason)
+function db_error(query, sent, reason)
 {
 	return Promise.resolve({
 		result: 'error',
 		query: query,
+		sent: sent,
 		reason: reason
 	});
 }
@@ -97,7 +98,7 @@ exports.translate = function(query)
 	}
 
 	if (ast == null)
-		return Promise.resolve(eof());
+		return Promise.resolve(ok());
 	if (ast.expr == 'SET')
 		return Promise.resolve(ok());
 
@@ -146,7 +147,7 @@ exports.translate = function(query)
 					} else if (ast.expr == 'UPDATE' || ast.expr == 'DELETE') {
 //console.log(result);
 						return resolve(ok(result.rowCount));
-					} else if (ast.expr == 'CREATE') {
+					} else if (ast.expr == 'CREATE' || ast.expr == 'ALTER') {
 						return resolve(ok());
 					}
 				})
@@ -157,7 +158,7 @@ exports.translate = function(query)
 					var missing_table = err.message.match(/^relation "(.*)" does not exist$/);
 					if (missing_table)
 						return reject(table_not_found(query, db.name + "." + missing_table[1]));
-					return reject(db_error(query, err.message));
+					return reject(db_error(query, sql, err.message));
 				});
 		}).catch(err => {
 			reject(new Error('got an error while translating: ' + query, err));
@@ -199,6 +200,7 @@ exports.ast_to_pgsql = function(ast)
 			case 'UPDATE': return Promise.resolve(update_to_pgsql(ast));
 			case 'DELETE': return delete_to_pgsql(ast);
 			case 'SHOW'  : return Promise.resolve(show_to_pgsql(ast));
+			case 'ALTER' : return Promise.resolve(alter_to_pgsql(ast));
 			default: return Promise.reject('unknown expression: ' + ast.expr);
 		}
 	} catch (e) {
@@ -206,25 +208,114 @@ exports.ast_to_pgsql = function(ast)
 	}
 }
 
+function alter_to_pgsql(ast)
+{
+	//console.log(ast);
+
+	if (ast.obj == 'TABLE') {
+		return [ ast.clauses.map(alter_table_clause(ast.table)).join('; '), [] ];
+	}
+
+	return [ '', [] ];
+}
+
+function alter_table_clause(table)
+{
+	return function(clause) {
+		if (clause.action == 'CHANGE') {
+			var sqls = [];
+			// rename
+			if (clause.column != clause.new_name)
+				sqls.push('ALTER TABLE ' + table + ' RENAME COLUMN ' + dq(clause.column) + ' TO ' + dq(clause.new_name));
+
+			// change data type
+			if (clause.def.auto_increment) {
+				var seq_name = table + '_seq';
+				sqls.push('CREATE SEQUENCE IF NOT EXISTS ' + seq_name);
+				sqls.push("SELECT setval('" + seq_name + "', (SELECT MAX(" + dq(clause.new_name) + ") FROM " + table + "))");
+				sqls.push('ALTER TABLE ' + table + ' ALTER COLUMN ' + dq(clause.new_name) + ' SET DATA TYPE int');
+				sqls.push('ALTER TABLE ' + table + ' ALTER COLUMN ' + dq(clause.new_name) + " SET DEFAULT nextval('" + seq_name + "'::regclass)");
+			} else
+				sqls.push('ALTER TABLE ' + table + ' ALTER COLUMN ' + dq(clause.new_name) + ' SET DATA TYPE ' + datatype_str(clause.def.datatype));
+
+			// change nullness
+			var nulldrop = (clause.def.can_be_null ? ' DROP' : ' SET');
+			sqls.push('ALTER TABLE ' + table + ' ALTER COLUMN ' + dq(clause.new_name) + nulldrop + ' NOT NULL');
+
+			// change default
+			if (!clause.def.auto_increment) {
+				if (!clause.def.default)
+					sqls.push('ALTER TABLE ' + table + ' ALTER COLUMN ' + dq(clause.new_name) + ' DROP DEFAULT');
+				else
+					sqls.push('ALTER TABLE ' + table + ' ALTER COLUMN ' + dq(clause.new_name) + ' SET DEFAULT ' + fix_zero_date(clause.def.default));
+			}
+
+			return  sqls.join('; ');
+		} else if (clause.action == 'ADD') {
+			// clause has either column_def or key
+			if (clause.column_def) {
+				var sqls = [];
+				sqls.push('ALTER TABLE ' + table + ' DROP COLUMN IF EXISTS ' + dq(clause.column_def.name));
+				sqls.push('ALTER TABLE ' + table + ' ADD COLUMN ' + create_field_str(clause.column_def));
+				if (clause.column_def.primary_key) {
+					sqls.push('ALTER TABLE ' + table + ' DROP CONSTRAINT IF EXISTS ' + table + '_pkey');
+					sqls.push('ALTER TABLE ' + table + ' ADD PRIMARY KEY (' + dq(clause.column_def.name) + ')');
+				}
+				return sqls.join('; ');
+			} else if (clause.key.type == 'PRIMARY') {
+				var sqls = [];
+				sqls.push('ALTER TABLE ' + table + ' DROP CONSTRAINT IF EXISTS ' + table + '_pkey');
+				sqls.push('ALTER TABLE ' + table + ' ADD PRIMARY KEY (' + clause.key.fields.map(f => dq(f.field)).join(',') + ')');
+				return sqls.join('; ');
+			} else if (clause.key.type == 'UNIQUE') {
+				return 'ALTER TABLE ' + table + ' ADD UNIQUE (' + clause.key.fields.map(f => dq(f.field)) + ')';
+			} else if (clause.key.type == 'INDEX') {
+				var sqls = [];
+				sqls.push('DROP INDEX IF EXISTS ' + clause.key.name);
+				sqls.push('CREATE INDEX ' + clause.key.name + ' ON ' + table + '(' + clause.key.fields.map(f => dq(f.field)) + ')');
+				return sqls.join('; ');
+			}
+			return '';
+		} else if (clause.action == 'ALTER') {
+			var sql = 'ALTER TABLE ' + table + ' ALTER COLUMN ' + dq(clause.column);
+			if (clause.default)
+				sql += ' SET DEFAULT ' + fix_zero_date(clause.default);
+			else
+				sql += ' DROP DEFAULT';
+			return sql;
+		} else if (clause.action == 'DROP') {
+			if (clause.key.type == 'PRIMARY')
+				return 'ALTER TABLE ' + table + ' DROP CONSTRAINT ' + table + '_pkey';
+			return '';
+		}
+	}
+	return '';
+}
+
 function show_to_pgsql(ast)
 {
 	if (ast.obj == 'DATABASES')
 		return ['SELECT datname FROM pg_database WHERE datistemplate = false', []];
 
-	if (ast.obj == 'FULL COLUMNS') {
-		// return Field, Type, Collation, Null (YES/NO), Key (PRI), Default, Extra
-		// collation is hardcoded to utf8mb4_unicode_ci even though it doesn't make sense for numbers and is wrong for blobs which are binary
-		return ["SELECT f.attname AS \"Field\", pg_catalog.format_type(f.atttypid,f.atttypmod) AS \"Type\", 'utf8mb4_unicode_ci' AS \"Collation\", CASE WHEN f.attnotnull THEN 'NO' ELSE 'YES' END AS \"Null\", CASE WHEN p.contype = 'p' THEN 'PRI' ELSE '' END AS \"Key\", CASE WHEN f.atthasdef = 't' THEN d.adsrc END AS \"Default\", '' AS \"Extra\" FROM pg_attribute f JOIN pg_class c ON c.oid = f.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = f.attnum LEFT JOIN pg_namespace n ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON p.conrelid = c.oid AND f.attnum = ANY (p.conkey) WHERE c.relkind = 'r'::char AND f.attnum > 0 AND n.nspname = 'public' and c.relname = $1",
-			[unquoteize(field_str(ast.table))]
-		];
-	}
-
 	if (ast.obj == 'COLUMNS') {
-		// return Field, Type, Null (YES/NO), Key (PRI), Default, Extra
-		return ["SELECT f.attname AS \"Field\", pg_catalog.format_type(f.atttypid,f.atttypmod) AS \"Type\", CASE WHEN f.attnotnull THEN 'NO' ELSE 'YES' END AS \"Null\", CASE WHEN p.contype = 'p' THEN 'PRI' ELSE '' END AS \"Key\", CASE WHEN f.atthasdef = 't' THEN d.adsrc END AS \"Default\", '' AS \"Extra\" FROM pg_attribute f JOIN pg_class c ON c.oid = f.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = f.attnum LEFT JOIN pg_namespace n ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON p.conrelid = c.oid AND f.attnum = ANY (p.conkey) WHERE c.relkind = 'r'::char AND f.attnum > 0 AND n.nspname = 'public' and c.relname = $1",
-			[unquoteize(field_str(ast.table))]
-		];
-}
+		var params = [unquoteize(field_str(ast.table))];
+		if (ast.full) {
+			// return Field, Type, Collation, Null (YES/NO), Key (PRI), Default, Extra
+			// collation is hardcoded to utf8mb4_unicode_ci even though it doesn't make sense for numbers and is wrong for blobs which are binary
+			var sql = "SELECT f.attname AS \"Field\", pg_catalog.format_type(f.atttypid,f.atttypmod) AS \"Type\", 'utf8mb4_unicode_ci' AS \"Collation\", CASE WHEN f.attnotnull THEN 'NO' ELSE 'YES' END AS \"Null\", CASE WHEN p.contype = 'p' THEN 'PRI' ELSE '' END AS \"Key\", CASE WHEN f.atthasdef = 't' THEN d.adsrc END AS \"Default\", '' AS \"Extra\" FROM pg_attribute f JOIN pg_class c ON c.oid = f.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = f.attnum LEFT JOIN pg_namespace n ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON p.conrelid = c.oid AND f.attnum = ANY (p.conkey) WHERE c.relkind = 'r'::char AND f.attnum > 0 AND n.nspname = 'public' and c.relname = $1";
+		} else {
+			// return Field, Type, Null (YES/NO), Key (PRI), Default, Extra
+			var sql = "SELECT f.attname AS \"Field\", pg_catalog.format_type(f.atttypid,f.atttypmod) AS \"Type\", CASE WHEN f.attnotnull THEN 'NO' ELSE 'YES' END AS \"Null\", CASE WHEN p.contype = 'p' THEN 'PRI' ELSE '' END AS \"Key\", CASE WHEN f.atthasdef = 't' THEN d.adsrc END AS \"Default\", '' AS \"Extra\" FROM pg_attribute f JOIN pg_class c ON c.oid = f.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = f.attnum LEFT JOIN pg_namespace n ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON p.conrelid = c.oid AND f.attnum = ANY (p.conkey) WHERE c.relkind = 'r'::char AND f.attnum > 0 AND n.nspname = 'public' and c.relname = $1";
+		}
+
+		if (!ast.cond) {
+		} else if (ast.cond.oper == 'LIKE') {
+			sql += " AND f.attname LIKE " + ast.cond.value;
+		} else if (ast.cond.oper == 'WHERE') {
+			sql += " AND f.attname " + where_expr(ast.cond.value);
+		}
+		return [sql, params];
+	}
 
 	if (ast.obj == 'TABLES') {
 		if (!ast.cond)
@@ -232,7 +323,39 @@ function show_to_pgsql(ast)
 		else if (ast.cond.oper == 'LIKE')
 			return ["SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE " + ast.cond.value + " ORDER BY table_name", []];
 		else if (ast.cond.oper == 'WHERE')
-			return ["SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name AND " + where_expr(ast.cond.expr) + " ORDER BY table_name", []];
+			return ["SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name " + where_expr(ast.cond.expr) + " ORDER BY table_name", []];
+	}
+
+	if (ast.obj == 'INDEX') {
+		// returns Table, Non_unique, Key_name, Seq_in_index, Column_name, Collation, Cardinality, Sub_part, Packed, Null, Index_type, Comment, Index_comment
+		var sql = "SELECT t.relname AS \"Table\", " +
+			"CASE WHEN indisunique THEN 0 ELSE 1 END AS \"Non_unique\", " +
+			"i.relname AS \"Key_name\", " +
+			"a.attname AS \"Column_name\", " +
+			"NULL as \"Sub_part\", 'BTREE' as \"Index_type\" " +
+			"FROM pg_class t, pg_class i, pg_index ix, pg_attribute a " +
+			"WHERE t.oid = ix.indrelid AND i.oid = ix.indexrelid AND a.attrelid = t.oid AND a.attnum = ANY(ix.indkey) AND t.relkind = 'r' " +
+			"AND t.relname = $1";
+		if (ast.where) {
+			// map field names from mysql fields to pgsql fields
+			ast.where.map(w => {
+				var field = w.field || w.expr.field;
+				var from = unquoteize(field_str(field));
+				var to;
+
+				switch(from) {
+					case 'column_name': to = 'a.attname'; break;
+					case 'key_name': to = 'i.relname'; break;
+				}
+
+				if (w.field)
+					w.field = to;
+				else
+					w.expr.field = to;
+			});
+			sql += ' AND ' + where_clause(ast.where).join(' ');
+		}
+		return [ sql, [unquoteize(field_str(ast.table))] ];
 	}
 }
 
@@ -281,9 +404,12 @@ function datatype_str(dt)
 	// no unsigned numbers in postgresql without domains
 	var t = dt.type || dt.toUpperCase();
 	switch (t) {
+		case 'TINYINT':
+			return 'INT';
 		case 'BIGINT':
 		case 'INT':
 			return t;
+		case 'CHAR':
 		case 'VARCHAR':
 			return t + '(' + dt.size + ')';
 		case 'LONGTEXT':
@@ -378,30 +504,29 @@ function dq(str)
 	return '"' + str + '"';
 }
 
+function create_field_str(field)
+{
+	var f = [];
+	// name, datatype, can_be_null, auto_increment
+	f.push(dq(field.name));
+	if (field.auto_increment)
+		f.push('SERIAL')
+	else
+		f.push(datatype_str(field.datatype));
+	if (!field.can_be_null)
+		f.push('NOT NULL');
+	if (field.default)
+		f.push('DEFAULT ' + fix_zero_date(field.default));
+	return f.join(' ');
+}
+
 function create_to_pgsql(ast)
 {
 	var parts = ['CREATE TABLE'];
 	parts.push(ast.table);
 	parts.push('(');
 
-	var fields_str = [];
-	ast.def.fields.forEach(field => {
-		var f = [];
-		// name, datatype, can_be_null, auto_increment
-		f.push(dq(field.name));
-		if (field.auto_increment)
-			f.push('SERIAL')
-		else
-			f.push(datatype_str(field.datatype));
-		if (!field.can_be_null)
-			f.push('NOT NULL');
-		if (field.default) {
-			if (field.default == "'0000-00-00 00:00:00'")
-				field.default = "'0001-01-01 00:00:00'";
-			f.push('DEFAULT ' + field.default);
-		}
-		fields_str.push(f.join(' '));
-	});
+	var fields_str = ast.def.fields.map(create_field_str);
 	parts.push(fields_str.join(', '));
 
 	var keys_str = [];
@@ -424,7 +549,7 @@ function create_to_pgsql(ast)
 
 	ast.def.keys.filter(key => key.type == 'INDEX').forEach(key => {
 		var index_str = ['CREATE INDEX'];
-		index_str.push(ast.table + '_' + key.name);
+		index_str.push(key.name);
 		index_str.push('ON');
 		index_str.push(ast.table);
 		index_str.push('(');
@@ -484,8 +609,11 @@ function unquoteize(str)
 
 function fix_zero_date(str)
 {
-	if (str == '0000-00-00 00:00:00')
-		return '0001-01-01 00:00:00';
+	if (str == "0000-00-00 00:00:00")
+		return "0001-01-01 00:00:00";
+	// lazy?
+	if (str == "'0000-00-00 00:00:00'")
+		return "'0001-01-01 00:00:00'";
 	return str;
 }
 

@@ -1,12 +1,31 @@
 start = 
 	ws* s:(select_stmt / create_stmt / insert_stmt / update_stmt /
 			delete_single_table_stmt / delete_multi_table_stmt /
-			set_stmt / describe_stmt /
-			show_tables_stmt / show_databases_stmt / show_full_columns_stmt
+			alter_table_stmt / set_stmt / describe_stmt /
+			show_tables_stmt / show_databases_stmt / show_columns_stmt / show_index_stmt
 		  ) ws* ";"?
 	{ return s }
 
-show_full_columns_stmt = "SHOW"i ws+ "FULL"i ws+ "COLUMNS"i ws+ "FROM"i ws+ t:field { return { expr:'SHOW', obj:'FULL COLUMNS', table:t } }
+show_index_stmt = "SHOW"i ws+ ("INDEXES"i / "INDEX"i / "KEYS"i) ws+ "FROM"i ws+ t:field w:where_clause?
+	{
+		return {
+			expr:'SHOW',
+			obj:'INDEX',
+			table:t,
+			where:w
+		}
+	}
+
+show_columns_stmt = "SHOW"i ws+ f:("FULL"i ws+)? "COLUMNS"i ws+ "FROM"i ws+ t:field e:show_tables_like_or_where?
+{
+	return {
+		expr:'SHOW',
+		obj:'COLUMNS',
+		full:!!f,
+		table:t,
+		cond:e
+	}
+}
 
 show_databases_stmt = "SHOW"i ws+ "DATABASES"i { return { expr:'SHOW', obj:'DATABASES' } }
 
@@ -18,6 +37,24 @@ show_tables_like_or_where =
 describe_stmt = "DESCRIBE"i ws+ t:ident { return { expr:'SHOW', obj:'COLUMNS', table:t } }
 
 set_stmt = "SET"i ws+ k:ident ws+ v:.* { return { expr:'SET', key:k, value:v.join('')} }
+
+alter_table_stmt = "ALTER"i ws+ "TABLE"i ws+ t:ident ws+ c1:alter_clause c2:alter_clause2*
+	{
+		return {
+			expr:'ALTER',
+			obj:'TABLE',
+			table:t,
+			clauses:[c1].concat(c2)
+		}
+	}
+alter_clause2 = ws* "," ws* c:alter_clause { return c }
+alter_clause =
+	"CHANGE"i ws+ ("COLUMN"i ws+)? f:field ws+ n:ident ws+ d:create_column_def { return { 'action':'CHANGE', column:f.ident, new_name:n, def:d } }
+  / "ADD"i ws+ k:create_field_key { return { action:'ADD', key:k } }
+  / "ADD"i ws+ ("COLUMN"i ws+)? d:create_field_def { return { action:'ADD', column_def:d } }
+  / "DROP"i ws+ "PRIMARY"i ws+ "KEY"i { return { action:'DROP', key:{type:'PRIMARY'} } }
+  / "ALTER"i ws+ ("COLUMN"i ws+) f:field ws+ "SET"i ws+ "DEFAULT"i ws+ l:literal { return { action:'ALTER', column:f.ident, default:l } }
+  / "ALTER"i ws+ ("COLUMN"i ws+) f:field ws+ "DROP"i ws+ "DEFAULT"i { return { action:'ALTER', column:f.ident, default:null } }
 
 delete_multi_table_stmt = "DELETE"i ws+ tl:ident_list a:from_clause w:where_clause
 	{
@@ -89,7 +126,7 @@ create_stmt_fields = "(" f:create_field_def g:create_field_comma_def* k:create_f
 	{ return { fields:[f].concat(g), keys:k } }
 
 create_field_comma_def = "," ws* f:create_field_def { return f }
-create_field_def = ws* n:ident ws d:create_column_def ws* { var obj = {name:n}; Object.assign(obj, d); return obj; }
+create_field_def = ws* n:field ws d:create_column_def ws* { var obj = {name:n.ident}; Object.assign(obj, d); return obj; }
 create_column_def = d:datatype o:create_column_opt* ws*
 	{
 		var uppers = o.map(s => s.toUpperCase().replace("_", ""));
@@ -99,15 +136,16 @@ create_column_def = d:datatype o:create_column_opt* ws*
 			datatype:d,
 			can_be_null:!uppers.includes("NOT NULL"),
 			auto_increment:uppers.includes("AUTOINCREMENT"),
+			primary_key:uppers.includes("PRIMARY KEY"),
 			default:def
 		};
 	}
 
 create_field_key = unique_key_field / primary_key_field / regular_key_field
 create_field_keys = "," ws* k:create_field_key ws* { return k }
-unique_key_field = ws* "UNIQUE KEY"i ws+ n:field ws+ "(" l:key_field_list ")" { return { type:'UNIQUE', name:n.ident, fields:l } }
-primary_key_field = ws* "PRIMARY KEY"i ws+ "(" l:key_field_list ")" { return { type:'PRIMARY', fields:l } }
-regular_key_field = ws* "KEY"i ws+ n:field ws+ "(" l:key_field_list ")" { return { type:'INDEX', name:n.ident, fields:l } }
+unique_key_field = ws* "UNIQUE"i ws+ "KEY"i ws+ n:field ws+ "(" l:key_field_list ")" { return { type:'UNIQUE', name:n.ident, fields:l } }
+primary_key_field = ws* "PRIMARY"i ws+ "KEY"i ws+ "(" l:key_field_list ")" { return { type:'PRIMARY', fields:l } }
+regular_key_field = ws* ("KEY"i / "INDEX"i) ws+ n:field ws+ "(" l:key_field_list ")" { return { type:'INDEX', name:n.ident, fields:l } }
 
 key_field = f:field s:dt_size? { return { field:f.ident, size:s } }
 key_field_comma = "," ws* k:key_field ws* { return k }
@@ -120,7 +158,8 @@ create_collation = ws+ "COLLATE "i c:collation { return c }
 
 create_column_opt_ai = "AUTOINCREMENT"i / "AUTO_INCREMENT"i
 create_column_opt_default = d:"DEFAULT"i ws+ t:literal_or_nullable { return "DEFAULT " + t }
-create_column_opt = ws* s:(nullable / create_column_opt_ai / create_column_opt_default) { return s }
+alter_add_column_primary_key = "PRIMARY"i ws+ "KEY"i
+create_column_opt = ws* s:(nullable / create_column_opt_ai / create_column_opt_default / $alter_add_column_primary_key) { return s }
 
 dt_size = "(" s:[0-9]+ ")" { return s.join('') }
 dt_int_mod = ws* m:("UNSIGNED"i / "ZEROFILL"i) { return m }
@@ -199,7 +238,7 @@ special_field = "@@[a-zA-Z_]+" / "DATABASE()"i / "FOUND_ROWS()"i
 keyword = "LIMIT"i / "ORDER"i / "GROUP"i / "WHERE"i / "JOIN"i / "ON"i / "INNER"i / "LEFT"i / "RIGHT"i / "CROSS"i / "USING"i
 from_clause = ws+ "FROM"i ws+ t1:aliasable_table t2:aliasable_table2* { return [t1].concat(t2) }
 aliasable_table =
-	t:field ws+ "AS" ws+ !keyword a:ident { t.alias = a; return t; }
+	t:field ws+ "AS"i ws+ !keyword a:ident { t.alias = a; return t; }
   / t:field ws+ !keyword a:ident { t.alias = a; return t; }
   / field
 aliasable_table2 = ws* "," ws* t:aliasable_table { return t }
@@ -235,7 +274,9 @@ singleline_comment = "--" .*
 multiline_comment = "/*" ([^*]*)? multiline_comment2*
 multiline_comment2 = "*/" / "*" [^*]+
 
-number = n:[0-9]+ { return parseInt(n.join(''), 10) }
+number =
+	n:[0-9]+ { return parseInt(n.join(''), 10) }
+  / "-"? n:[0-9]+ { return -1 * parseInt(n.join(''), 10) }
 number_comma = "," ws* n:number { return n }
 number_list = n:number ws* c:number_comma* { return [n].concat(c) }
 
@@ -249,7 +290,7 @@ field_or_literal_or_nullable2 = ws* "," ws* f:field_or_literal_or_nullable ws* {
 
 list = f:field_or_literal_or_nullable g:field_or_literal_or_nullable2* { return [f].concat(g) }
 
-ident = h:[@a-zA-Z_] t:[@a-zA-Z0-9_]* { return [h].concat(t).join('') }
+ident = h:$[@a-zA-Z_] t:$[@a-zA-Z0-9_]* { return h + t }
 ident2 = "," ws* f:ident { return f }
 ident_list = f:ident g:ident2* { return [f].concat(g) }
 

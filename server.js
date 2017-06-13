@@ -71,6 +71,7 @@ server.on('connection', function (conn) {
 	});
 
 	conn.on('query', query => {
+		//console.log(query);
 		translator.translate(query).then(result => {
 			switch (result.result) {
 				case 'rowset':
