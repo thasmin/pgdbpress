@@ -230,7 +230,7 @@ function alter_table_clause(table)
 
 			// change data type
 			if (clause.def.auto_increment) {
-				var seq_name = table + '_seq';
+				var seq_name = table + '_' + clause.new_name + '_seq';
 				sqls.push('CREATE SEQUENCE IF NOT EXISTS ' + seq_name);
 				sqls.push("SELECT setval('" + seq_name + "', (SELECT MAX(" + dq(clause.new_name) + ") FROM " + table + "))");
 				sqls.push('ALTER TABLE ' + table + ' ALTER COLUMN ' + dq(clause.new_name) + ' SET DATA TYPE int');
@@ -268,7 +268,10 @@ function alter_table_clause(table)
 				sqls.push('ALTER TABLE ' + table + ' ADD PRIMARY KEY (' + clause.key.fields.map(f => dq(f.field)).join(',') + ')');
 				return sqls.join('; ');
 			} else if (clause.key.type == 'UNIQUE') {
-				return 'ALTER TABLE ' + table + ' ADD UNIQUE (' + clause.key.fields.map(f => dq(f.field)) + ')';
+				var sqls = [];
+				sqls.push('ALTER TABLE ' + table + ' DROP CONSTRAINT IF EXISTS ' + clause.key.name);
+				sqls.push('ALTER TABLE ' + table + ' ADD CONSTRAINT ' + clause.key.name + ' UNIQUE (' + clause.key.fields.map(f => dq(f.field)) + ')');
+				return sqls.join('; ');
 			} else if (clause.key.type == 'INDEX') {
 				var sqls = [];
 				sqls.push('DROP INDEX IF EXISTS ' + clause.key.name);
@@ -405,7 +408,6 @@ function datatype_str(dt)
 	var t = dt.type || dt.toUpperCase();
 	switch (t) {
 		case 'TINYINT':
-			return 'INT';
 		case 'BIGINT':
 		case 'INT':
 			return t;

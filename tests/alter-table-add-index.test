@@ -1,0 +1,2 @@
+ALTER TABLE table ADD INDEX tab_ndx (col1)
+DROP INDEX IF EXISTS tab_ndx; CREATE INDEX tab_ndx ON table("col1")

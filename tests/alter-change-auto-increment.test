@@ -1,0 +1,2 @@
+ALTER TABLE table CHANGE COLUMN `col` new_col BIGINT UNSIGNED NOT NULL AUTO_INCREMENT
+ALTER TABLE table RENAME COLUMN "col" TO "new_col"; CREATE SEQUENCE IF NOT EXISTS table_new_col_seq; SELECT setval('table_new_col_seq', (SELECT MAX("new_col") FROM table)); ALTER TABLE table ALTER COLUMN "new_col" SET DATA TYPE int; ALTER TABLE table ALTER COLUMN "new_col" SET DEFAULT nextval('table_new_col_seq'::regclass); ALTER TABLE table ALTER COLUMN "new_col" SET NOT NULL

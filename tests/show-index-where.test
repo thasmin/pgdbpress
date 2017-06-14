@@ -1,0 +1,3 @@
+SHOW INDEX FROM table WHERE column_name = 'val1' AND key_name = 'val2'
+SELECT t.relname AS "Table", CASE WHEN indisunique THEN 0 ELSE 1 END AS "Non_unique", i.relname AS "Key_name", a.attname AS "Column_name", NULL as "Sub_part", 'BTREE' as "Index_type" FROM pg_class t, pg_class i, pg_index ix, pg_attribute a WHERE t.oid = ix.indrelid AND i.oid = ix.indexrelid AND a.attrelid = t.oid AND a.attnum = ANY(ix.indkey) AND t.relkind = 'r' AND t.relname = $1 AND  ( a.attname = 'val1' AND i.relname = 'val2' )
+[ "table" ]

@@ -1,0 +1,2 @@
+SELECT term_id FROM wp_terms AS t WHERE t.slug = 'simple' ORDER BY t.term_id ASC LIMIT 1
+SELECT "term_id" FROM "wp_terms" AS t WHERE t."slug" = 'simple' ORDER BY t."term_id" ASC LIMIT 1;
